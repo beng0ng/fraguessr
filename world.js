@@ -31,7 +31,7 @@ const TIER_ZOOM = [[0, 1.9], [0, 2.4], [1.25, 99], [1.75, 99], [2.6, 99], [1.5, 
 // each kind of place gets its own voice: water in blue serif italics, continents in wide warm capitals,
 // countries in sans with a halo, fading from bold capitals for the largest to light text for the smallest
 const SERIF = 'ui-serif, "Iowan Old Style", Georgia, "Times New Roman", serif';
-const SANS = 'Geist, ui-sans-serif, system-ui, sans-serif';
+const SANS = 'Manrope, ui-sans-serif, system-ui, sans-serif';
 const MONO = '"Geist Mono", ui-monospace, monospace';
 const spread = (s, gap) => s.split('').join(gap);
 const LSTYLE = new Map();
