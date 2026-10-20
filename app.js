@@ -923,8 +923,16 @@ function heroFor(kind, el, payload) {
   const cv = el.querySelector('canvas.vignette');
   if (cv) vignette = createVignette(cv, payload.vig);
   const host = el.querySelector('.model');
-  getStage().then((st) => {
-    if (!st || !host.isConnected) { el.classList.add('no-3d'); return; }
+  // on the public site a ready-made picture shows at once; the 3D model is built once the panel has slid in
+  if (THUMBS) {
+    const img = new Image(); img.className = 'hero-ph'; img.alt = ''; img.decoding = 'async';
+    img.src = `${THUMBS}${kind === 'ing' ? `i-${payload.ing.id}` : `f-${payload.f.id}-${isDark() ? 'd' : 'l'}`}.webp`;
+    host.append(img);
+  }
+  const later = (fn) => (modelStage ? setTimeout(fn, 160) : window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 700 }) : setTimeout(fn, 450));
+  later(() => getStage().then((st) => {
+    if (!host.isConnected) return;
+    if (!st) { el.classList.add('no-3d'); return; }
     st.mount(host);
     const dark = isDark();
     if (kind === 'ing') {
@@ -935,8 +943,8 @@ function heroFor(kind, el, payload) {
       const notes = f.ingredients.slice().sort((a, b) => vividness(ING_COLOR[b]) - vividness(ING_COLOR[a])).slice(0, 3).map((id) => ING[id]);
       st.showFragrance(f, payload.liquid, notes, dark ? mix(sig, '#332c27', 0.8) : mix(sig, '#ffffff', 0.88), sig, sweepFor(sig));
     }
-    requestAnimationFrame(() => el.classList.add('loaded'));
-  });
+    st.ready().then(() => { if (host.isConnected) requestAnimationFrame(() => el.classList.add('loaded')); });
+  }));
 }
 
 // ── selection tint: page accent, stage wash and globe glow follow the ingredient ──

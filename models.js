@@ -1284,15 +1284,22 @@ export function createModelStage() {
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const io = new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; });
 
+  // shaders compile in the background (KHR_parallel_shader_compile where the browser has it), so picking a new
+  // model doesn't freeze the page; nothing is drawn until they are ready and the canvas stays clear meanwhile
+  let ready = Promise.resolve(), live = true;
   function show(group) {
     if (current) { turntable.remove(current); dispose(current); }
     current = group; turntable.add(group);
     turntable.rotation.y = rotY = -0.35; velY = 1.6; shownAt = performance.now(); dirty = true;
     frame(turntable, camera, aspect);
+    live = false; renderer.setRenderTarget(null); renderer.clear();
+    const done = () => { if (current !== group) return; live = true; dirty = true; shownAt = performance.now(); };
+    ready = (renderer.compileAsync ? renderer.compileAsync(scene, camera) : Promise.resolve()).then(done, done);
+    return ready;
   }
   function loop() {
     raf = requestAnimationFrame(loop);
-    if (!host || !onScreen || document.hidden) return;
+    if (!host || !onScreen || document.hidden || !live) return;
     // after each pick the turntable turns slowly for a while, then comes to rest and stops redrawing until it is dragged
     const now = performance.now(), dt = Math.min(0.25, (now - lastT) / 1000); lastT = now;
     const cruise = reduce || now - shownAt > 6000 ? 0 : 0.22;
@@ -1315,8 +1322,9 @@ export function createModelStage() {
   const up = () => { dragging = false; }; canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
   return {
     mount(el) { host = el; dirty = true; el.appendChild(canvas); ro.disconnect(); ro.observe(el); io.disconnect(); io.observe(el); resize(); if (!raf) loop(); },
-    showIngredient(ing, oilColor, plinthColor, label) { backdrop.visible = false; show(composeIngredient(ing, oilColor, plinthColor, label)); },
-    showFragrance(f, liquid, notes, plinthColor, tint, sweep) { if (sweep) backdrop.paint(sweep[0], sweep[1]); else backdrop.visible = false; show(composeFragrance(f, liquid, notes, plinthColor, tint)); },
+    showIngredient(ing, oilColor, plinthColor, label) { backdrop.visible = false; return show(composeIngredient(ing, oilColor, plinthColor, label)); },
+    showFragrance(f, liquid, notes, plinthColor, tint, sweep) { if (sweep) backdrop.paint(sweep[0], sweep[1]); else backdrop.visible = false; return show(composeFragrance(f, liquid, notes, plinthColor, tint)); },
+    ready: () => ready,
   };
 }
 

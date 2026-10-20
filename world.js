@@ -66,6 +66,16 @@ function shadeSprite(rgb) {
 export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, getDpr = () => Math.min(devicePixelRatio || 1, 2) }) {
   const ctx = canvas.getContext('2d');
   let dpr = 1, stars = [];
+  // country borders: each point's unit vector is worked out once, then only rotated with the view each frame
+  let borders = null;
+  import('./borders.js').then((m) => {
+    const D = Math.PI / 180;
+    borders = m.borderLines().map((l) => {
+      const n = l.length / 2, v = new Float32Array(n * 3);
+      for (let k = 0; k < n; k++) { const r = l[k * 2] * D, a = l[k * 2 + 1] * D - Math.PI, o = Math.cos(r); v[k * 3] = -o * Math.cos(a) * 0.8; v[k * 3 + 1] = Math.sin(r) * 0.8; v[k * 3 + 2] = o * Math.sin(a) * 0.8; }
+      return v;
+    });
+  }).catch(() => {});
   function resize() {
     const { W, H } = getSize(); dpr = getDpr();
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
@@ -136,6 +146,24 @@ export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, 
     for (let lng = -180; lng < 180; lng += step) { const pts = []; for (let lat = -80; lat <= 80; lat += 3) pts.push([lat, lng]); line(pts, 0.04); }
     if (z > 1.5) for (const lat of [23.44, -23.44]) { const pts = []; for (let lng = -180; lng <= 180; lng += 3) pts.push([lat, lng]); line(pts, 0.07 * Math.min(1, (z - 1.5) / 0.4), [3, 5]); }
     ctx.setLineDash([]);
+
+    // borders between countries, a little bolder as you zoom in
+    if (borders) {
+      const cT = Math.cos(view.theta), cP = Math.cos(view.phi), sT = Math.sin(view.theta), sP = Math.sin(view.phi), asp = W / H;
+      ctx.lineWidth = Math.min(1.7, 0.8 + (z - 1) * 0.35); ctx.lineJoin = 'round';
+      ctx.strokeStyle = dark ? 'rgba(255,240,224,0.42)' : 'rgba(70,46,32,0.55)';
+      ctx.beginPath();
+      for (const v of borders) {
+        let pen = false;
+        for (let i = 0; i < v.length; i += 3) {
+          const x = v[i], y = v[i + 1], w = v[i + 2], d = -sP * cT * x + sT * y + cP * cT * w;
+          if (d < 0) { pen = false; continue; }
+          const px = ((((cP * x + sP * w) / asp) * S + 1) / 2) * W, py = ((-(sP * sT * x + cT * y - cP * sT * w) * S + 1) / 2) * H;
+          if (pen) ctx.lineTo(px, py); else { ctx.moveTo(px, py); pen = true; }
+        }
+      }
+      ctx.stroke();
+    }
 
     // names
     const placed = [];

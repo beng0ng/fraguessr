@@ -23,6 +23,10 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="preload" href="https://cdn.jsdelivr.net/npm/cobe@2.0.1/dist/index.esm.js" as="fetch" crossorigin>
+<!-- every module the daily page needs, fetched in parallel instead of one import at a time -->
+<link rel="modulepreload" href="app.js"><link rel="modulepreload" href="data.js"><link rel="modulepreload" href="facts.js"><link rel="modulepreload" href="world.js"><link rel="modulepreload" href="fx.js"><link rel="modulepreload" href="rarity.js"><link rel="modulepreload" href="motion.js"><link rel="modulepreload" href="game.js"><link rel="modulepreload" href="stats.js"><link rel="modulepreload" href="borders.js">
 <meta name="apple-mobile-web-app-title" content="Fraguessr">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Fraguessr","url":"https://fraguessr.com/","description":"A daily perfume guessing game: name the notes in today's fragrance, then pin where they grow on a 3D globe.","applicationCategory":"GameApplication","operatingSystem":"Any","browserRequirements":"Requires a modern web browser","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
 <title>Fraguessr: the daily perfume guessing game</title>
@@ -1432,6 +1436,10 @@ body { font-variant-numeric: lining-nums; }
 @media (max-width: 560px) and (prefers-color-scheme: dark) { .theme-seg[data-v="auto"] [data-theme-v="dark"] { display: none; } }
 @media (max-width: 560px) and (prefers-color-scheme: light) { .theme-seg[data-v="auto"] [data-theme-v="light"] { display: none; } }
 @media (max-width: 430px) { .brand { display: none; } }
+/* ── v41: a picture stands in while the 3D model is built ── */
+.hero .hero-ph { position: absolute; left: 50%; top: 50%; height: 94%; width: auto; aspect-ratio: 1; transform: translate(-50%, -50%); pointer-events: none; transition: opacity .5s var(--ease); }
+.hero.frag .hero-ph { -webkit-mask-image: radial-gradient(closest-side, #000 70%, transparent); mask-image: radial-gradient(closest-side, #000 70%, transparent); }
+.hero.loaded .hero-ph { opacity: 0; }
 </style>
 
 </head>

@@ -216,7 +216,7 @@ function lobby(preset, whoPreset) {
     const sig = A.fragHex(f), dark = A.isDark();
     st.showFragrance(f, A.liquidFor(f), f.ingredients.slice(0, 3).map((id) => A.ING[id]), dark ? A.mix(sig, '#332c27', 0.8) : A.mix(sig, '#ffffff', 0.88), sig,
       dark ? [A.mix(sig, '#141110', 0.82), A.mix(sig, '#1d1916', 0.72)] : [A.mix(sig, '#fffdfa', 0.84), A.mix(sig, '#f3ede4', 0.7)]);
-    requestAnimationFrame(() => hero.classList.add('loaded'));
+    st.ready().then(() => requestAnimationFrame(() => hero.classList.add('loaded')));
   });
 }
 function drift() {
@@ -332,7 +332,7 @@ function renderRound() {
       st.showIngredient(ing, A.ingHex(ing), dark ? A.mix(A.ingHex(ing), '#2a2a2e', 0.78) : A.mix(A.ingHex(ing), '#ffffff', 0.82),
         blind ? { title: `Specimen ${String.fromCharCode(65 + S.i)}`, sub: 'origin unknown' } : undefined);
     }
-    requestAnimationFrame(() => hero.classList.add('loaded'));
+    st.ready().then(() => requestAnimationFrame(() => hero.classList.add('loaded')));
   });
 }
 
@@ -812,7 +812,8 @@ function scentHero() {
     hero.addEventListener('pointerdown', () => { if (hero.dataset.live) return; hero.dataset.live = '1'; scentHero(); }, { once: true });
     return;
   }
-  host.querySelector('img.g-sc-shot')?.remove(); hero.classList.remove('still');
+  // the picture stays until the live bottle can draw
+  const shot = host.querySelector('img.g-sc-shot');
   const f = S.f, found = S.log.filter((e) => e.hit).map((e) => A.ING[e.id]).slice(-3).reverse();
   A.getStage().then((st) => {
     if (!st || !host.isConnected) { hero.classList.add('no-3d'); return; }
@@ -820,7 +821,7 @@ function scentHero() {
     const sig = A.fragHex(f), dark = A.isDark();
     st.showFragrance(f, A.liquidFor(f), found, dark ? A.mix(sig, '#332c27', 0.8) : A.mix(sig, '#ffffff', 0.88), sig,
       dark ? [A.mix(sig, '#141110', 0.82), A.mix(sig, '#1d1916', 0.72)] : [A.mix(sig, '#fffdfa', 0.84), A.mix(sig, '#f3ede4', 0.7)]);
-    requestAnimationFrame(() => hero.classList.add('loaded'));
+    st.ready().then(() => { shot?.remove(); hero.classList.remove('still'); requestAnimationFrame(() => hero.classList.add('loaded')); });
   });
 }
 // the opening: the name writes itself in, the categories pop, the profile bar fills family by family
@@ -1254,9 +1255,14 @@ function sparks(n) {
 function confetti() {
   return Array.from({ length: 120 }, () => ({ x: Math.random(), y: -0.1 - Math.random() * 0.3, vy: 0.25 + Math.random() * 0.35, sway: Math.random() * 6, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10, w: 5 + Math.random() * 5, h: 3 + Math.random() * 4, c: Math.floor(Math.random() * 8) }));
 }
+let fxDrawn = true;
 function frame() {
   drawPins();
   if (!fx) return;
+  // nothing to animate and nothing left on the layer: skip clearing the full-screen canvas every frame
+  const aiming = S?.phase === 'guess' && mouse && !(matchMedia('(hover: none)').matches);
+  if (!fxItems.length && !aiming && !fxDrawn) return;
+  fxDrawn = fxItems.length > 0 || aiming;
   const st = A.els.stage, W = st.clientWidth, H = st.clientHeight, dpr = Math.min(2, devicePixelRatio || 1);
   if (fx.width !== Math.round(W * dpr) || fx.height !== Math.round(H * dpr)) { fx.width = Math.round(W * dpr); fx.height = Math.round(H * dpr); }
   const c = fctx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
