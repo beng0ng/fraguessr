@@ -569,18 +569,20 @@ for (const [name, loc, z] of REGIONS) {
 }
 
 // ── panel: list views ───────────────────────────────────
-let tab = 'ing', fragSort = 'family';
+let tab = 'ing', listTab = 'ing', fragSort = 'family';
 const listEl = $('#view-list'), detailEl = $('#view-detail'), filterEl = $('#filter');
 $('#count-ing').textContent = INGREDIENTS.length; $('#count-frag').textContent = FRAGRANCES.length;
 function setTab(t) {
   if (tab === 'col' && t !== 'col') markSeen();
-  tab = t; $('#tab-ing').setAttribute('aria-selected', t === 'ing'); $('#tab-frag').setAttribute('aria-selected', t === 'frag'); $('#tab-col').setAttribute('aria-selected', t === 'col');
+  tab = t; if (t !== 'col') listTab = t; $('#tab-ing').setAttribute('aria-selected', t === 'ing'); $('#tab-frag').setAttribute('aria-selected', t === 'frag'); $('.panel').dataset.tab = t;
   filterEl.placeholder = { ing: 'Filter ingredients or countries…', frag: 'Filter perfumes or houses…', col: 'Filter your collection…' }[t];
   filterEl.value = ''; models?.cancelThumbnails(); renderList(true); listEl.scrollTop = 0; showList();
+  if (!play.active) markMode('explore');
 }
 $('#tab-ing').addEventListener('click', () => setTab('ing'));
 $('#tab-frag').addEventListener('click', () => setTab('frag'));
-$('#tab-col').addEventListener('click', () => setTab('col'));
+// the collection is its own tab in the header; it closes the game and shows the album in the side panel
+$('#tab-col').addEventListener('click', () => { if (play.active) gamePromise?.then((g) => g.closeGame()); setTab('col'); });
 filterEl.addEventListener('input', () => { renderList(); showList(); });
 
 function liquidFor(f) {
@@ -1573,11 +1575,13 @@ function startPlay(mode) {
 const modesEl = $('.modes');
 function markMode(m) {
   if (m === 'explore' && !modelsPromise && THUMBS) warmModels();
+  if (m === 'explore' && tab === 'col') m = 'col';
   modesEl.dataset.mode = m;
+  $('#tab-col').setAttribute('aria-pressed', String(m === 'col'));
   $('#m-explore').setAttribute('aria-selected', String(m === 'explore'));
   $('#play').setAttribute('aria-selected', String(m === 'play'));
 }
-function explore() { if (play.active) gamePromise?.then((g) => g.closeGame()); markMode('explore'); }
+function explore() { if (play.active) gamePromise?.then((g) => g.closeGame()); if (tab === 'col') setTab(listTab); markMode('explore'); }
 $('#m-explore').addEventListener('click', explore);
 $('#play').addEventListener('click', () => (play.active ? null : startPlay()));
 // the brand leads back to today's scent; help and stats live in the game module

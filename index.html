@@ -1384,6 +1384,41 @@ h2.title { font-size: 38px; font-weight: 500; line-height: 1; letter-spacing: -0
   .theme-seg { height: 34px; } .theme-seg button { height: 26px; padding: 0 6px; }
 }
 @media (max-width: 400px) { .modes button { padding: 0 11px; font-size: 14.5px; } .btn.top-ic, .search-trigger { width: 32px; } }
+/* ── v39: Daily and Explore on the left, Collection as its own tab on the right ── */
+.brand { flex: 0 1 auto; }
+.top-end { flex: 1 1 0; }
+.col-tab { position: relative; flex: none; display: inline-flex; align-items: center; gap: 8px; height: 50px; padding: 0 18px 0 16px; border-radius: 14px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: 600 15.5px var(--font-sans); letter-spacing: -0.005em; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 8px 24px -16px rgba(0,0,0,.35); transition: background .3s var(--ease), color .3s var(--ease), border-color .3s; }
+.col-tab svg { width: 18px; height: 18px; flex: none; color: var(--accent); transition: color .3s; }
+.col-tab b { font-size: 12px; font-weight: 500; padding: 1px 7px; border-radius: 999px; background: var(--muted); color: var(--muted-foreground); transition: background .3s, color .3s; }
+.col-tab:hover { background: var(--muted); }
+.col-tab[aria-pressed="true"] { background: var(--foreground); border-color: var(--foreground); color: var(--background); }
+.col-tab[aria-pressed="true"] svg { color: var(--background); }
+.col-tab[aria-pressed="true"] b { background: color-mix(in srgb, var(--background) 18%, transparent); color: var(--background); }
+.col-tab.has-new::after { content: ""; position: absolute; top: 7px; right: 7px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+.col-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.modes[data-mode="col"] .modes-pill { opacity: 0; }
+.modes-pill { transition: transform .5s var(--ease), background .35s, box-shadow .35s, opacity .25s; }
+.panel[data-tab="col"] .tabs { display: none; }
+@media (max-width: 1100px) { .col-tab b { display: none; } }
+@media (max-width: 860px) { .col-tab { height: 46px; padding: 0 14px; font-size: 14.5px; border-radius: 12px; } }
+@media (max-width: 680px) { .col-tab span { display: none; } .col-tab { width: 46px; padding: 0; justify-content: center; } }
+@media (max-width: 560px) { .col-tab { width: 34px; height: 34px; border-radius: 10px; box-shadow: none; } .col-tab svg { width: 17px; height: 17px; } }
+@media (max-width: 400px) { .col-tab { width: 32px; } }
+body { font-variant-numeric: lining-nums; }
+/* the serif draws zero like a letter O, so counts use the interface face */
+.col-stat b, .sheet-nums b { font-family: var(--font-sans); font-weight: 600; font-size: 28px; letter-spacing: -0.02em; }
+@media (max-width: 560px) {
+  .topbar { gap: 6px; } .top-end { gap: 4px; }
+  .modes button { padding: 0 11px; font-size: 14.5px; }
+  .topbar:has(.modes:not([data-mode="play"])) #open-help { display: none; }
+  /* the theme switch becomes one button that flips to the other theme */
+  .theme-seg { padding: 0; border: 0; background: none; } .theme-seg .theme-pill { display: none; }
+  .theme-seg button { width: 34px; height: 34px; padding: 0; justify-content: center; border-radius: 10px; }
+  .theme-seg[data-v="light"] [data-theme-v="light"], .theme-seg[data-v="dark"] [data-theme-v="dark"] { display: none; }
+}
+@media (max-width: 560px) and (prefers-color-scheme: dark) { .theme-seg[data-v="auto"] [data-theme-v="dark"] { display: none; } }
+@media (max-width: 560px) and (prefers-color-scheme: light) { .theme-seg[data-v="auto"] [data-theme-v="light"] { display: none; } }
+@media (max-width: 430px) { .brand { display: none; } }
 </style>
 
 </head>
@@ -1401,6 +1436,7 @@ h2.title { font-size: 38px; font-weight: 500; line-height: 1; letter-spacing: -0
     </nav>
     <div class="top-end">
     <div class="spacer"></div>
+    <button class="col-tab" id="tab-col" aria-pressed="false" title="Your collection"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="7" rx="1.5"/><rect x="14" y="4" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>Collection</span><b class="mono" id="count-col"></b></button>
     <button class="search-trigger" id="open-search" aria-label="Search ingredients and fragrances">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
       <span>Search</span><kbd>⌘K</kbd>
@@ -1447,7 +1483,6 @@ h2.title { font-size: 38px; font-weight: 500; line-height: 1; letter-spacing: -0
         <div class="tabs" role="tablist">
           <button class="tab" role="tab" id="tab-ing" aria-selected="true">Ingredients <span class="mono" id="count-ing"></span></button>
           <button class="tab" role="tab" id="tab-frag" aria-selected="false">Fragrances <span class="mono" id="count-frag"></span></button>
-          <button class="tab" role="tab" id="tab-col" aria-selected="false">Collection <span class="mono" id="count-col"></span></button>
         </div>
         <input class="input" id="filter" placeholder="Filter ingredients…" autocomplete="off">
       </div>
