@@ -1274,32 +1274,39 @@ export function createModelStage() {
   const canvas = document.createElement('canvas'); canvas.className = 'bottle-canvas';
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' }); } catch { return null; }
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
   renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.1;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap;
   const { scene, backdrop } = buildScene(renderer);
   const camera = new THREE.PerspectiveCamera(22, 1, 0.05, 80);
   const turntable = new THREE.Group(); scene.add(turntable);
-  let host = null, raf = 0, rotY = 0, velY = 0, dragging = false, lastX = 0, onScreen = true, aspect = 1, current = null;
+  let host = null, raf = 0, tick = 0, lastT = 0, shownAt = 0, dirty = true, rotY = 0, velY = 0, dragging = false, lastX = 0, onScreen = true, aspect = 1, current = null;
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const io = new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; });
 
   function show(group) {
     if (current) { turntable.remove(current); dispose(current); }
     current = group; turntable.add(group);
-    turntable.rotation.y = rotY = -0.35; velY = 1.6;
+    turntable.rotation.y = rotY = -0.35; velY = 1.6; shownAt = performance.now(); dirty = true;
     frame(turntable, camera, aspect);
   }
   function loop() {
     raf = requestAnimationFrame(loop);
     if (!host || !onScreen || document.hidden) return;
-    if (!dragging) { velY += ((reduce ? 0 : 0.22) - velY) * 0.03; rotY += velY / 60; }
+    // after each pick the turntable turns slowly for a while, then comes to rest and stops redrawing until it is dragged
+    const now = performance.now(), dt = Math.min(0.25, (now - lastT) / 1000); lastT = now;
+    const cruise = reduce || now - shownAt > 6000 ? 0 : 0.22;
+    if (!dragging) { velY += (cruise - velY) * (1 - Math.pow(0.97, dt * 60)); rotY += velY * dt; }
+    if (!dragging && !dirty && Math.abs(velY) < 0.002) return;
+    // while it cruises at its slow turn, every other frame is enough
+    if (!dragging && cruise && Math.abs(velY - cruise) < 0.05 && (++tick & 1)) return;
+    dirty = false;
     turntable.rotation.y = rotY;
     renderer.render(scene, camera);
   }
   function resize() {
     if (!host) return; const r = host.getBoundingClientRect(); if (!r.width || !r.height) return;
-    renderer.setSize(r.width, r.height, false); aspect = r.width / r.height; camera.aspect = aspect; camera.updateProjectionMatrix();
+    renderer.setSize(r.width, r.height, false); aspect = r.width / r.height; camera.aspect = aspect; camera.updateProjectionMatrix(); dirty = true;
     if (current) frame(turntable, camera, aspect);
   }
   const ro = new ResizeObserver(resize);
@@ -1307,7 +1314,7 @@ export function createModelStage() {
   canvas.addEventListener('pointermove', (e) => { if (!dragging) return; const dx = e.clientX - lastX; lastX = e.clientX; rotY += dx * 0.012; velY = dx * 0.7; });
   const up = () => { dragging = false; }; canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
   return {
-    mount(el) { host = el; el.appendChild(canvas); ro.disconnect(); ro.observe(el); io.disconnect(); io.observe(el); resize(); if (!raf) loop(); },
+    mount(el) { host = el; dirty = true; el.appendChild(canvas); ro.disconnect(); ro.observe(el); io.disconnect(); io.observe(el); resize(); if (!raf) loop(); },
     showIngredient(ing, oilColor, plinthColor, label) { backdrop.visible = false; show(composeIngredient(ing, oilColor, plinthColor, label)); },
     showFragrance(f, liquid, notes, plinthColor, tint, sweep) { if (sweep) backdrop.paint(sweep[0], sweep[1]); else backdrop.visible = false; show(composeFragrance(f, liquid, notes, plinthColor, tint)); },
   };

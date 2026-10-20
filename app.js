@@ -194,7 +194,9 @@ function pauseSpin(ms = 6000) { autoSpin = false; clearTimeout(idleTimer); idleT
 const labelEls = new Map();
 let pinEl = null, pinFor = null, lastT = performance.now();
 // on a phone the globe scrolls out of view under the list; while it is off screen it isn't redrawn
-let stageSeen = true;
+let stageSeen = true, lastInput = 0, frameNo = 0;
+const welcomeEl = document.getElementById('welcome');
+for (const ev of ['pointerdown', 'pointermove', 'wheel']) stage.addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true });
 new IntersectionObserver(([e]) => { stageSeen = e.isIntersecting; }).observe(stage);
 function tick(now) {
   if (!stageSeen) { lastT = now; requestAnimationFrame(tick); return; }
@@ -209,6 +211,10 @@ function tick(now) {
     view.theta = Math.max(-1.2, Math.min(1.2, view.theta));
   }
   view.scale += (view.tScale - view.scale) * k;
+  // while the welcome covers the globe nothing is redrawn, and while it only drifts on its own
+  // (no hand on it, no flight or zoom under way) it is redrawn every other frame
+  const idle = !dragging && view.tPhi == null && Math.abs(view.tScale - view.scale) < 0.002 && now - lastInput > 1500 && now - selAt > 1600 && !play.active;
+  if (!welcomeEl.hidden && !welcomeEl.classList.contains('out') || (idle && (++frameNo & 1))) { requestAnimationFrame(tick); return; }
   const upd = { phi: view.phi, theta: view.theta, scale: view.scale * fit, mapSamples: fineDots ? 32000 : Math.round(Math.min(32000, 22000 * view.scale ** 1.2)) };
   const m = refreshMarkers(false); if (m) Object.assign(upd, m);
   // ease the globe's glow and base toward the selected ingredient's color
@@ -308,6 +314,21 @@ function shadowSprite() {
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64); return shadowCv;
 }
 const mixHex = (a, b, t) => { const A = hexRgb(a), B = hexRgb(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t))})`; };
+// a glass bead per colour, drawn once and then stamped: bright cap, pure colour, deeper rim, crisp edge and glint
+const BEAD_R = 32, BEAD_PAD = 1.125, beadSprites = new Map();
+function beadSprite(hx, dark) {
+  const key = hx + dark; let c = beadSprites.get(key); if (c) return c;
+  const half = Math.ceil(BEAD_R * BEAD_PAD), r = BEAD_R;
+  c = document.createElement('canvas'); c.width = c.height = half * 2; const g = c.getContext('2d'); g.translate(half, half);
+  const cg = g.createRadialGradient(-r * 0.32, -r * 0.36, r * 0.04, 0, 0, r * 1.02);
+  cg.addColorStop(0, mixHex(hx, '#ffffff', 0.8)); cg.addColorStop(0.36, mixHex(hx, '#ffffff', 0.22));
+  cg.addColorStop(0.78, hx); cg.addColorStop(1, mixHex(hx, '#000000', 0.32));
+  g.beginPath(); g.arc(0, 0, r, 0, Math.PI * 2); g.fillStyle = cg; g.fill();
+  g.lineWidth = r * 0.13; g.strokeStyle = dark ? 'rgba(255,255,255,.42)' : mixHex(hx, '#000000', 0.42); g.stroke();
+  g.globalAlpha = 0.9; g.fillStyle = '#fff';
+  g.beginPath(); g.ellipse(-r * 0.34, -r * 0.38, r * 0.24, r * 0.15, -0.65, 0, Math.PI * 2); g.fill();
+  beadSprites.set(key, c); return c;
+}
 let selAt = -1e9; // when the current pick was made, for the globe's shockwave
 const PHASE = Object.fromEntries(INGREDIENTS.map((ing, i) => [ing.id, (i * 2.399) % (Math.PI * 2)]));
 function dotRadius(ing) { return (1.5 + Math.sqrt(USES[ing.id].length) * 0.34) * Math.pow(view.scale, 0.38); }
@@ -380,14 +401,8 @@ function drawDotsInner(now) {
     dctx.globalAlpha = edge * (off ? 0.45 : 1);
     dctx.beginPath(); dctx.arc(0, 0, r, 0, Math.PI * 2);
     if (off) { dctx.fillStyle = dark ? '#4a423c' : '#d3cabd'; dctx.fill(); dctx.restore(); continue; }
-    const hx = ingHex(ing), cg = dctx.createRadialGradient(-r * 0.32, -r * 0.36, r * 0.04, 0, 0, r * 1.02);
-    cg.addColorStop(0, mixHex(hx, '#ffffff', 0.8)); cg.addColorStop(0.36, mixHex(hx, '#ffffff', 0.22));
-    cg.addColorStop(0.78, hx); cg.addColorStop(1, mixHex(hx, '#000000', 0.32));
-    dctx.fillStyle = cg; dctx.fill();
-    dctx.lineWidth = Math.max(0.6, r * 0.13);
-    dctx.strokeStyle = dark ? 'rgba(255,255,255,.42)' : mixHex(hx, '#000000', 0.42); dctx.stroke();
-    dctx.globalAlpha = edge * 0.9; dctx.fillStyle = '#fff';
-    dctx.beginPath(); dctx.ellipse(-r * 0.34, -r * 0.38, r * 0.24, r * 0.15, -0.65, 0, Math.PI * 2); dctx.fill();
+    const hx = ingHex(ing), bs = r * BEAD_PAD;
+    dctx.drawImage(beadSprite(hx, dark), -bs, -bs, bs * 2, bs * 2);
     // a fine ring marks the selected dot and the spotlit family
     if (isSel || (fam && on)) {
       dctx.globalAlpha = edge * (isSel ? 1 : 0.75 * w); dctx.lineWidth = isSel ? 1.6 : 1;
@@ -793,6 +808,7 @@ const thumbIO = new IntersectionObserver((entries) => {
 // elsewhere, or if a file is missing, the thumbnail is rendered live in 3D
 const THUMBS = document.querySelector('meta[name="fraguessr-thumbs"]')?.content;
 function loadThumb(el) {
+  el.classList.add('loading');
   if (THUMBS && !el.dataset.live) {
     const [k, id] = el.dataset.thumb.split(':');
     const img = new Image(); img.alt = ''; img.decoding = 'async';

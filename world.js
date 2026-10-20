@@ -52,6 +52,17 @@ function makeStyle(tier, dark) {
   }
 }
 
+// one soft radial blob per colour, tinted and scaled per shade at draw time
+const SHADE_RES = 0.25, SHADE_SPRITES = new Map();
+let shadeCv = null, shadeCtx = null;
+function shadeSprite(rgb) {
+  const key = rgb.join(); let c = SHADE_SPRITES.get(key); if (c) return c;
+  c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  const [r, gg, b] = rgb;
+  gr.addColorStop(0, `rgba(${r},${gg},${b},1)`); gr.addColorStop(0.45, `rgba(${r},${gg},${b},0.55)`); gr.addColorStop(1, `rgba(${r},${gg},${b},0)`);
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64); SHADE_SPRITES.set(key, c); return c;
+}
+
 export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, getDpr = () => Math.min(devicePixelRatio || 1, 2) }) {
   const ctx = canvas.getContext('2d');
   let dpr = 1, stars = [];
@@ -84,22 +95,29 @@ export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, 
     const g = ctx.createRadialGradient(cx, cy, R * 0.94, cx, cy, R * 1.16);
     const rim = dark ? '214,168,118' : '196,150,104';
     g.addColorStop(0, `rgba(${rim},0)`); g.addColorStop(0.28, `rgba(${rim},${dark ? 0.2 : 0.12})`); g.addColorStop(1, `rgba(${rim},0)`);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 1.16, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, R * 1.16, 0, Math.PI * 2); ctx.arc(cx, cy, R * 0.94, 0, Math.PI * 2, true); ctx.fill(); // just the ring, not the disc inside it
 
-    // density shades: ellipses foreshortened toward the limb, blended so overlaps deepen
+    // density shades: ellipses foreshortened toward the limb, blended so overlaps deepen. They are soft blobs,
+    // so they are drawn from cached sprites onto a quarter-resolution canvas and scaled up in one go
     if (shades) {
-      ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
-      ctx.globalCompositeOperation = dark ? 'screen' : 'source-over';
+      const sw = Math.ceil(W * SHADE_RES), shh = Math.ceil(H * SHADE_RES);
+      if (!shadeCv) { shadeCv = document.createElement('canvas'); shadeCtx = shadeCv.getContext('2d'); }
+      if (shadeCv.width !== sw || shadeCv.height !== shh) { shadeCv.width = sw; shadeCv.height = shh; }
+      const s = shadeCtx;
+      s.setTransform(1, 0, 0, 1, 0, 0); s.clearRect(0, 0, sw, shh);
+      s.globalCompositeOperation = dark ? 'screen' : 'source-over';
+      const rBase = 0.8 * view.scale * fit() * H / 2 / 0.8;
       for (const sh of shades) {
         const p = project(sh.loc, 0); if (p.z < 0.02) continue;
-        const ang = 0.05 + Math.sqrt(sh.w) * 0.016, k = Math.max(0.08, p.z / 0.8);
-        const rr = ang * (0.8 * view.scale * fit() * H / 2) / 0.8;
-        const g2 = ctx.createRadialGradient(0, 0, 0, 0, 0, rr);
-        const [cr, cg, cb] = sh.rgb, al = (dark ? 0.07 : 0.05) * sh.a;
-        g2.addColorStop(0, `rgba(${cr},${cg},${cb},${al})`); g2.addColorStop(0.45, `rgba(${cr},${cg},${cb},${al * 0.55})`); g2.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
-        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.atan2(p.y - cy, p.x - cx)); ctx.scale(k, 1);
-        ctx.fillStyle = g2; ctx.beginPath(); ctx.arc(0, 0, rr, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        const ang = 0.05 + Math.sqrt(sh.w) * 0.016, k = Math.max(0.08, p.z / 0.8), rr = ang * rBase;
+        const a = Math.atan2(p.y - cy, p.x - cx), co = Math.cos(a) * SHADE_RES, si = Math.sin(a) * SHADE_RES;
+        s.setTransform(co * k, si * k, -si, co, p.x * SHADE_RES, p.y * SHADE_RES);
+        s.globalAlpha = (dark ? 0.07 : 0.05) * sh.a;
+        s.drawImage(shadeSprite(sh.rgb), -rr, -rr, rr * 2, rr * 2);
       }
+      s.globalAlpha = 1; s.globalCompositeOperation = 'source-over';
+      ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+      ctx.drawImage(shadeCv, 0, 0, sw / SHADE_RES, shh / SHADE_RES);
       ctx.restore();
     }
 
