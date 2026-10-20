@@ -122,11 +122,23 @@ function refreshMarkers(force) {
   return { markers: markerList(), arcs: arcList() };
 }
 
+// adaptive quality: when the globe can't keep up (a slow GPU, a big high-DPI screen) its three canvases
+// drop to fewer pixels, a step at a time, judged on the median frame so one-off stalls don't count
+const QUALITY = [1, 0.75, 0.55];
+let qLevel = 0, qTimes = [], qFrom = performance.now() + 5000, globeDpr = 1;
+const renderDpr = () => Math.max(0.75, Math.min(devicePixelRatio || 1, 2) * QUALITY[qLevel]);
+const globeSize = () => ({ width: W * renderDpr() / globeDpr, height: H * renderDpr() / globeDpr });
+function watchFrames(now, ms) {
+  if (now < qFrom || document.hidden || qLevel >= QUALITY.length - 1) return;
+  qTimes.push(ms); if (qTimes.length < 90) return;
+  const median = qTimes.sort((a, b) => a - b)[45]; qTimes = [];
+  if (median > 26) { qLevel++; world.resize(); resizeDots(); globe?.update(globeSize()); qFrom = now + 2500; }
+}
 async function initGlobe() {
-  const dpr = Math.min(devicePixelRatio || 1, 2);
   const createGlobe = await (cobeReady ||= loadCobe());
+  globeDpr = renderDpr();
   globe = createGlobe(canvas, {
-    devicePixelRatio: dpr, width: W, height: H, phi: view.phi, theta: view.theta, scale: view.scale * fit,
+    devicePixelRatio: globeDpr, width: W, height: H, phi: view.phi, theta: view.theta, scale: view.scale * fit,
     mapSamples: fineDots ? 32000 : 20000, ...themeOpts(), markers: markerList(), arcs: [], arcWidth: 0.6, arcHeight: 0.28, markerElevation: 0.01, opacity: 0.95,
   });
   requestAnimationFrame(() => canvas.classList.add('ready'));
@@ -186,6 +198,7 @@ let stageSeen = true;
 new IntersectionObserver(([e]) => { stageSeen = e.isIntersecting; }).observe(stage);
 function tick(now) {
   if (!stageSeen) { lastT = now; requestAnimationFrame(tick); return; }
+  watchFrames(now, now - lastT);
   const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
   const k = 1 - Math.pow(0.0025, dt); // smoothing
   if (view.tPhi != null) { view.phi += (view.tPhi - view.phi) * k; view.theta += (view.tTheta - view.theta) * k; if (Math.abs(view.tPhi - view.phi) < 0.0005 && Math.abs(view.tTheta - view.theta) < 0.0005) view.tPhi = view.tTheta = null; }
@@ -272,7 +285,7 @@ function drawOverlay() {
 // ── ingredient dots: crisp cores with a soft coloured glow ─────────────
 const dotsCv = $('#dots'), dctx = dotsCv.getContext('2d');
 let dotsDpr = 1, hoverIng = null;
-function resizeDots() { dotsDpr = Math.min(devicePixelRatio || 1, 2); dotsCv.width = Math.round(W * dotsDpr); dotsCv.height = Math.round(H * dotsDpr); }
+function resizeDots() { dotsDpr = renderDpr(); dotsCv.width = Math.round(W * dotsDpr); dotsCv.height = Math.round(H * dotsDpr); }
 const glowSprites = new Map();
 function glowSprite(hex, dark) {
   const key = hex + dark; let c = glowSprites.get(key); if (c) return c;
@@ -776,7 +789,18 @@ const thumbIO = new IntersectionObserver((entries) => {
     loadThumb(e.target);
   }
 }, { root: listEl, rootMargin: '120px 200px' });
+// the public site ships every list thumbnail as a ready-made image (see the fraguessr-thumbs meta tag);
+// elsewhere, or if a file is missing, the thumbnail is rendered live in 3D
+const THUMBS = document.querySelector('meta[name="fraguessr-thumbs"]')?.content;
 function loadThumb(el) {
+  if (THUMBS && !el.dataset.live) {
+    const [k, id] = el.dataset.thumb.split(':');
+    const img = new Image(); img.alt = ''; img.decoding = 'async';
+    img.onload = () => { if (!el.isConnected) return; el.append(img); requestAnimationFrame(() => el.classList.add('ready')); };
+    img.onerror = () => { el.dataset.live = '1'; loadThumb(el); };
+    img.src = `${THUMBS}${k}-${id}${k === 'f' ? (isDark() ? '-d' : '-l') : ''}.webp`;
+    return;
+  }
   getModels().then((m) => {
     if (!m || !el.isConnected) return;
     const [k, id] = el.dataset.thumb.split(':');
@@ -791,6 +815,14 @@ function loadThumb(el) {
   });
 }
 function observeThumbs() { listEl.querySelectorAll('[data-thumb]').forEach((el) => thumbIO.observe(el)); }
+// build tooling: ?prerender renders every list thumbnail for the current theme so a script can save them as files
+if (new URLSearchParams(location.search).has('prerender')) {
+  const keys = new URLSearchParams(location.search).get('prerender') || '';
+  window.prerenderThumbs = () => getModels().then((m) => Promise.all([
+    ...(keys.includes('i') ? INGREDIENTS.map((i) => m.thumbnail(`i:${i.id}`, m.thumbBuilders.ingredient(i))) : []),
+    ...(keys.includes('f') ? FRAGRANCES.map((f) => m.thumbnail(`f:${f.id}:${isDark() ? 'd' : 'l'}`, m.thumbBuilders.fragrance(f, liquidFor(f), fragHex(f)), sweepFor(fragHex(f)))) : []),
+  ]).then(() => m.renderedThumbs));
+}
 
 // category bar: jump + scrollspy
 function spy() {
@@ -1501,7 +1533,7 @@ function shadeList() {
   return out;
 }
 // ── cartographic layer (atmosphere, graticule, place names) ──
-const world = createWorldLayer($('#world'), { project, view, getSize: () => ({ W, H }), isDark, fit: () => fit });
+const world = createWorldLayer($('#world'), { project, view, getSize: () => ({ W, H }), isDark, fit: () => fit, getDpr: renderDpr });
 world.resize(); resizeDots();
 
 // ── Fraguessr game ─────────────────────────────────────
@@ -1591,7 +1623,7 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && !welcome.hidden) 
 $('.brand').addEventListener('click', showWelcome);
 
 // ── boot ───────────────────────────────────────────────
-new ResizeObserver(() => { size(); world.resize(); resizeDots(); globe?.update({ width: W, height: H }); }).observe(stage);
+new ResizeObserver(() => { size(); world.resize(); resizeDots(); globe?.update(globeSize()); }).observe(stage);
 renderList(true);
 initGlobe();
 if (location.hash.length > 1) fromHash(); else showWelcome();

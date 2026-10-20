@@ -1351,6 +1351,7 @@ export function thumbnail(key, build, sweep, { size = 0, first = false } = {}) {
   return new Promise((done) => { const job = { key, build, sweep, done, size }; first ? queue.unshift(job) : queue.push(job); pump(); });
 }
 export function cancelThumbnails() { queue.length = 0; }
+export const renderedThumbs = thumbCache; // read by the build script that saves thumbnails as files
 export const thumbBuilders = {
   ingredient: (ing) => () => { const s = normalize(specimen(ing), 1); s.rotation.y = -0.4; const g = new THREE.Group(); g.add(s, contactShadow(s.userData.foot * 1.05, 0, 0.7, 1.1)); return g; },
   fragrance: (f, liquid, tint) => () => { const b = normalize(bottle(f, liquid, { tint }), 1, { by: 'y' }); b.rotation.y = -0.45; const g = new THREE.Group(); g.add(b, contactShadow(b.userData.foot * 1.3, 0, 0.8)); return g; },

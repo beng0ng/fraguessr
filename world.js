@@ -52,11 +52,11 @@ function makeStyle(tier, dark) {
   }
 }
 
-export function createWorldLayer(canvas, { project, view, getSize, isDark, fit }) {
+export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, getDpr = () => Math.min(devicePixelRatio || 1, 2) }) {
   const ctx = canvas.getContext('2d');
   let dpr = 1, stars = [];
   function resize() {
-    const { W, H } = getSize(); dpr = Math.min(devicePixelRatio || 1, 2);
+    const { W, H } = getSize(); dpr = getDpr();
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
     // a fixed starfield, only visible in dark mode outside the globe
     let s = 7; const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
