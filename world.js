@@ -66,16 +66,24 @@ function shadeSprite(rgb) {
 export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, getDpr = () => Math.min(devicePixelRatio || 1, 2) }) {
   const ctx = canvas.getContext('2d');
   let dpr = 1, stars = [];
-  // country borders: each point's unit vector is worked out once, then only rotated with the view each frame
-  let borders = null;
-  import('./borders.js').then((m) => {
-    const D = Math.PI / 180;
-    borders = m.borderLines().map((l) => {
-      const n = l.length / 2, v = new Float32Array(n * 3);
-      for (let k = 0; k < n; k++) { const r = l[k * 2] * D, a = l[k * 2 + 1] * D - Math.PI, o = Math.cos(r); v[k * 3] = -o * Math.cos(a) * 0.8; v[k * 3 + 1] = Math.sin(r) * 0.8; v[k * 3 + 2] = o * Math.sin(a) * 0.8; }
-      return v;
+  // coastlines and country borders: each point's unit vector is worked out once, then only rotated with the view each
+  // frame. Every line also keeps a bounding cap (its centre and angular radius) so lines on the far side are skipped whole
+  let borders = null, land = null, fineLand = null, fineLoading = false;
+  const D = Math.PI / 180;
+  function toVecs(lines) {
+    return lines.map((l) => {
+      const n = l.length / 2, v = new Float32Array(n * 3); let mx = 0, my = 0, mz = 0;
+      for (let k = 0; k < n; k++) {
+        const r = l[k * 2] * D, a = l[k * 2 + 1] * D - Math.PI, o = Math.cos(r);
+        mx += v[k * 3] = -o * Math.cos(a); my += v[k * 3 + 1] = Math.sin(r); mz += v[k * 3 + 2] = o * Math.sin(a);
+      }
+      const m = Math.hypot(mx, my, mz) || 1; mx /= m; my /= m; mz /= m;
+      let minDot = 1; for (let k = 0; k < n; k++) minDot = Math.min(minDot, v[k * 3] * mx + v[k * 3 + 1] * my + v[k * 3 + 2] * mz);
+      return { v, c: [mx, my, mz], s: minDot < 0 ? 2 : Math.sqrt(1 - minDot * minDot) }; // s: sine of the cap radius; a cap past 90° is never wholly hidden
     });
-  }).catch(() => {});
+  }
+  import('./borders.js').then((m) => { borders = toVecs(m.borderLines()); land = toVecs(m.landRings()); }).catch(() => {});
+  let pts = new Float32Array(4096 * 3);
   function resize() {
     const { W, H } = getSize(); dpr = getDpr();
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
@@ -147,22 +155,44 @@ export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, 
     if (z > 1.5) for (const lat of [23.44, -23.44]) { const pts = []; for (let lng = -180; lng <= 180; lng += 3) pts.push([lat, lng]); line(pts, 0.07 * Math.min(1, (z - 1.5) / 0.4), [3, 5]); }
     ctx.setLineDash([]);
 
-    // borders between countries, a little bolder as you zoom in
-    if (borders) {
-      const cT = Math.cos(view.theta), cP = Math.cos(view.phi), sT = Math.sin(view.theta), sP = Math.sin(view.phi), asp = W / H;
-      ctx.lineWidth = Math.min(1.7, 0.8 + (z - 1) * 0.35); ctx.lineJoin = 'round';
-      ctx.strokeStyle = dark ? 'rgba(255,240,224,0.42)' : 'rgba(70,46,32,0.55)';
-      ctx.beginPath();
-      for (const v of borders) {
-        let pen = false;
-        for (let i = 0; i < v.length; i += 3) {
-          const x = v[i], y = v[i + 1], w = v[i + 2], d = -sP * cT * x + sT * y + cP * cT * w;
-          if (d < 0) { pen = false; continue; }
-          const px = ((((cP * x + sP * w) / asp) * S + 1) / 2) * W, py = ((-(sP * sT * x + cT * y - cP * sT * w) * S + 1) / 2) * H;
-          if (pen) ctx.lineTo(px, py); else { ctx.moveTo(px, py); pen = true; }
+    // the land: a soft fill and a clear coastline, then the borders between countries, a little bolder as you zoom in
+    if (land) {
+      if (z > 1.7 && !fineLand && !fineLoading) { fineLoading = true; import('./coast-fine.js').then((m) => { fineLand = toVecs(m.fineLandRings()); }).catch(() => {}); }
+      const cT = Math.cos(view.theta), cP = Math.cos(view.phi), sT = Math.sin(view.theta), sP = Math.sin(view.phi);
+      const k = R, dx = -sP * cT, dy = sT, dz = cP * cT; // k: globe radius in pixels; (dx, dy, dz): toward the viewer
+      // project a line into pts as [x, y, depth]; points behind the globe are pinned to its rim so a fill stays closed
+      const proj = (v) => {
+        const n = v.length / 3; if (pts.length < n * 3) pts = new Float32Array(n * 3 * 2);
+        for (let i = 0, j = 0; i < v.length; i += 3, j += 3) {
+          const x = v[i], y = v[i + 1], w = v[i + 2], d = dx * x + dy * y + dz * w;
+          let sx = cP * x + sP * w, sy = sP * sT * x + cT * y - cP * sT * w;
+          if (d < 0) { const m = Math.hypot(sx, sy) || 1; sx /= m; sy /= m; }
+          pts[j] = cx + sx * k; pts[j + 1] = cy - sy * k; pts[j + 2] = d;
         }
+        return n;
+      };
+      const facing = (L) => dx * L.c[0] + dy * L.c[1] + dz * L.c[2];
+      const rings = z > 1.7 && fineLand ? fineLand : land;
+      const fill = new Path2D(), coast = new Path2D();
+      for (const L of rings) {
+        const f = facing(L); if (f < -L.s) continue; // wholly on the far side
+        const n = proj(L.v);
+        fill.moveTo(pts[0], pts[1]); for (let j = 3; j < n * 3; j += 3) fill.lineTo(pts[j], pts[j + 1]); fill.closePath();
+        let pen = false;
+        for (let j = 0; j <= n * 3; j += 3) { const q = j === n * 3 ? 0 : j; if (pts[q + 2] < 0) { pen = false; continue; } if (pen) coast.lineTo(pts[q], pts[q + 1]); else { coast.moveTo(pts[q], pts[q + 1]); pen = true; } }
       }
-      ctx.stroke();
+      ctx.fillStyle = dark ? 'rgba(255,236,214,0.075)' : 'rgba(150,108,72,0.11)'; ctx.fill(fill);
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      ctx.lineWidth = Math.min(2, 1.1 + (z - 1) * 0.35); ctx.strokeStyle = dark ? 'rgba(255,238,220,0.5)' : 'rgba(70,46,32,0.5)'; ctx.stroke(coast);
+      if (borders) {
+        const b = new Path2D();
+        for (const L of borders) {
+          if (facing(L) < -L.s) continue;
+          const n = proj(L.v); let pen = false;
+          for (let j = 0; j < n * 3; j += 3) { if (pts[j + 2] < 0) { pen = false; continue; } if (pen) b.lineTo(pts[j], pts[j + 1]); else { b.moveTo(pts[j], pts[j + 1]); pen = true; } }
+        }
+        ctx.lineWidth = Math.min(1.5, 0.7 + (z - 1) * 0.3); ctx.strokeStyle = dark ? 'rgba(255,240,224,0.3)' : 'rgba(70,46,32,0.36)'; ctx.stroke(b);
+      }
     }
 
     // names

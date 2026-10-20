@@ -5,7 +5,7 @@ let cobeReady = null; // one load of the (patched) library
 async function loadCobe() {
   try {
     const src = await (await fetch(COBE_URL)).text();
-    const patched = src.replace('smoothstep(8e-3,0.,g)', 'smoothstep(6e-3/max(x,1.),0.,g)'); // x is the zoom: constant on-screen dot size
+    const patched = src.replace('smoothstep(8e-3,0.,g)', 'smoothstep(5e-3/max(x,1.),0.,g)'); // x is the zoom: constant on-screen dot size
     if (patched === src) throw new Error('cobe shader changed');
     const url = URL.createObjectURL(new Blob([patched], { type: 'text/javascript' }));
     const m = await import(url); URL.revokeObjectURL(url); fineDots = true; return m.default;
@@ -100,8 +100,8 @@ size();
 
 function themeOpts() {
   return isDark()
-    ? { dark: 1, diffuse: 1.3, mapBrightness: 3.2, mapBaseBrightness: 0, baseColor: [0.31, 0.28, 0.26], glowColor: [0.2, 0.16, 0.12], markerColor: [0.88, 0.63, 0.4], arcColor: [0.88, 0.63, 0.4] }
-    : { dark: 0, diffuse: 1.25, mapBrightness: 1.45, mapBaseBrightness: 0, baseColor: [1, 0.985, 0.96], glowColor: [1, 0.97, 0.92], markerColor: [0.66, 0.36, 0.2], arcColor: [0.66, 0.36, 0.2] };
+    ? { dark: 1, diffuse: 1.3, mapBrightness: 2, mapBaseBrightness: 0, baseColor: [0.31, 0.28, 0.26], glowColor: [0.2, 0.16, 0.12], markerColor: [0.88, 0.63, 0.4], arcColor: [0.88, 0.63, 0.4] }
+    : { dark: 0, diffuse: 1.25, mapBrightness: 0.8, mapBaseBrightness: 0, baseColor: [1, 0.985, 0.96], glowColor: [1, 0.97, 0.92], markerColor: [0.66, 0.36, 0.2], arcColor: [0.66, 0.36, 0.2] };
 }
 
 // explore-mode ingredient dots are drawn on their own canvas (drawDots) so they sit exactly
