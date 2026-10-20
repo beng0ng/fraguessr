@@ -146,6 +146,7 @@ function leave() {
 // ── screens ───────────────────────────────────────────────
 const ICONS = ['chanel-no-5', 'guerlain-shalimar', 'dior-sauvage-edt', 'tom-ford-lost-cherry', 'creed-aventus', 'yves-saint-laurent-black-opium', 'le-labo-santal-33', 'dior-j-adore'];
 function lobby(preset, whoPreset) {
+  if (S?.bonus) { clearInterval(timer); S = null; return scentOpen(true); }
   if (NET) leaveRoom();
   if (S?.kind === 'scent') S = null;
   clearInterval(timer); clearPins(); vignette?.stop(); vignette = null; fxItems = [];
@@ -384,6 +385,7 @@ function submit(timeout) {
   const rec = record(), km = rec.km, points = rec.points;
   S.results.push(rec);
   S.total += points; S.phase = 'reveal';
+  if (S.bonus) store.set(`geo:${S.bonus}`, { rounds: S.results.map((r) => ({ id: r.ing.id, guess: r.guess, km: r.km, points: r.points })) });
   if (S.mp) publishMine();
   A.play.ver++; A.refresh();
   const res = S.results[S.i], now = performance.now(), color = A.ingHex(ing);
@@ -469,8 +471,10 @@ function summary() {
   if (S.mp) return standings();
   S.phase = 'done'; clearInterval(timer);
   const max = S.rounds.length * MAX, [, rank, line] = RANKS.find(([n]) => S.total >= n * (max / 25000));
-  const key = `best:${S.mode}`, prev = store.get(key) || 0, isBest = S.total > prev;
+  const key = `best:${S.mode}`, prev = S.bonus ? 0 : store.get(key) || 0, isBest = !S.bonus && S.total > prev;
   if (isBest) store.set(key, S.total);
+  if (S.bonus) { store.set(`geo:${S.bonus}`, { ...store.get(`geo:${S.bonus}`), done: 1 }); A.saved?.(); }
+  const label = S.bonus ? 'Daily bonus' : MODES[S.mode].label;
   vignette?.stop(); vignette = null;
   A.setTint(null);
   setPins(S.results.flatMap((r, k) => [...(r.guess ? [{ loc: r.guess, kind: 'guess', small: true, text: String(k + 1) }] : []), { loc: r.ing.loc, kind: 'answer', ing: r.ing, text: r.ing.name }]));
@@ -480,14 +484,14 @@ function summary() {
   showSplash(`<span class="mono">Final score</span><b>${S.total.toLocaleString()}</b>`);
   A.play.ver++; A.refresh();
   A.flyTo(A.midpoint(S.results.map((r) => r.ing.loc)), 0.95);
-  hud.innerHTML = `<span class="mono muted">${MODES[S.mode].label}</span><span class="g-hq"><b>${S.total.toLocaleString()}</b> / ${max.toLocaleString()} · ${rank}</span>`;
-  fab.textContent = 'Play again'; fab.classList.add('ready'); fab.disabled = false;
+  hud.innerHTML = `<span class="mono muted">${label}</span><span class="g-hq"><b>${S.total.toLocaleString()}</b> / ${max.toLocaleString()} · ${rank}</span>`;
+  fab.textContent = S.bonus ? 'Back to today’s scent' : 'Play again'; fab.classList.add('ready'); fab.disabled = false;
   gameEl.innerHTML = `
     <div class="game">
       <div class="detail-top"><button class="btn icon ghost" data-act="lobby" aria-label="Back to game menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
         <div class="crumbs"><span>Fraguessr</span><span>/</span><b>Results</b></div></div>
       <div class="g-final">
-        <span class="mono muted">${MODES[S.mode].label} · ${today()}</span>
+        <span class="mono muted">${S.bonus ? `Daily bonus · ${dailyName(S.bonus)}` : `${label} · ${today()}`}</span>
         <div class="g-big mono" data-count="${S.total}">0</div>
         <div class="g-meter"><i style="--p:${Math.min(1, S.total / max)}"></i></div>
         <h2 class="title">${rank}</h2><p class="prose">${line}${isBest && prev ? ` New personal best, up from ${prev.toLocaleString()}.` : ''}</p>
@@ -498,11 +502,11 @@ function summary() {
             <span class="g-nm">${A.esc(r.ing.name)}<span>${r.frag ? `${A.esc(r.frag.name)} · ` : ''}${A.esc(r.ing.country)}</span></span>
             <span class="g-km mono">${r.km == null ? '—' : `${Math.round(r.km).toLocaleString()} km`}</span><span class="g-p mono">${r.points.toLocaleString()}</span>
             <i class="g-rb" style="--p:${Math.min(1, r.points / MAX)}"></i></div>`).join('')}</div>
-        <div class="g-share"><code id="g-sharetext">${shareText(rank)}</code></div>
-        <div class="g-actions">
+        ${S.bonus ? '' : `<div class="g-share"><code id="g-sharetext">${shareText(rank)}</code></div>`}
+        <div class="g-actions">${S.bonus ? `<button class="btn primary" data-act="lobby">Back to today’s scent</button></div>` : `
           <button class="btn" data-act="share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy result</button>
           <button class="btn primary" data-act="again"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Play a new game</button>
-        </div>
+        </div>`}
         <button class="btn ghost" data-act="exit">Back to the atlas</button>
       </div>
     </div>`;
@@ -579,6 +583,7 @@ let scentOrder = null;
 const ING_BY = Object.fromEntries(INGREDIENTS.map((i) => [i.id, i]));
 // today's perfume, for the welcome card (works before the game has opened)
 export const todayScent = () => scentOf(today());
+export const scentPoolIds = () => scentPool().map((f) => f.id); // for the build script that pre-renders the bottles
 function scentPool() {
   if (scentOrder) return scentOrder;
   const pool = SCENT_POOL.map((id) => FRAGRANCES.find((f) => f.id === id)).filter((f) => f && scentSize(f) >= SCENT_MIN && scentSize(f) <= SCENT_MAX), r = rng(hash('fraguessr:scent'));
@@ -776,8 +781,9 @@ function scentHints() {
 const hintCount = () => (S.hints.length ? `${S.hints.length} of ${SCENT_LIVES - 1}` : 'none yet');
 function scentHud() {
   const total = S.notes.filter((x) => x.id).length;
-  hud.innerHTML = `<span class="mono muted">${S.daily ? 'Daily scent' : 'Practice scent'}</span><span class="g-hq"><b>${A.esc(S.f.name)}</b> · ${S.found.size} / ${total} notes</span><span class="g-drops" role="img" aria-label="${S.lives} chances left">${scentDrops()}</span>`;
-  hud.classList.add('show'); fab.classList.remove('show'); fab.hidden = true;
+  hud.innerHTML = `<span class="g-hq"><b>${A.esc(S.f.name)}</b> · ${S.found.size} / ${total} notes</span><span class="g-drops" role="img" aria-label="${S.lives} chances left">${scentDrops()}</span>`;
+  // the panel already carries the name, count and drops; on a phone, where the panel sits under the globe, the summary stays
+  hud.classList.toggle('show', matchMedia('(max-width: 860px)').matches); fab.classList.remove('show'); fab.hidden = true;
 }
 function scentUpdate() {
   const total = S.notes.filter((x) => x.id).length;
@@ -792,9 +798,21 @@ function scentUpdate() {
 }
 const scentTried = () => (S.tried.length ? `<span class="mono muted">Not in it</span>${S.tried.map((id) => `<span class="badge note g-sc-n no">${A.esc(A.ING[id].name)}</span>`).join('')}` : '');
 function scentFact(slot, c) { if (slot && c) A.facts.mount(slot, c.id, c.r, { isNew: c.isNew }); }
-// the bottle, with the last few notes you found floating around it
+// on the published site the daily bottle is a pre-rendered picture, so the page opens without loading the 3D engine;
+// touching it swaps in the live, turnable bottle
+const HEROES = document.querySelector('meta[name="fraguessr-thumbs"]')?.content;
 function scentHero() {
   const hero = gameEl.querySelector('#g-hero'), host = hero?.querySelector('.model'); if (!host) return;
+  if (HEROES && !hero.dataset.live) {
+    if (host.querySelector('img.g-sc-shot')) return;
+    const img = new Image(); img.className = 'g-sc-shot'; img.alt = ''; img.decoding = 'async';
+    img.onload = () => hero.classList.add('loaded', 'still');
+    img.onerror = () => { hero.dataset.live = '1'; img.remove(); scentHero(); };
+    img.src = `${HEROES}h-${S.f.id}.webp`; host.append(img);
+    hero.addEventListener('pointerdown', () => { if (hero.dataset.live) return; hero.dataset.live = '1'; scentHero(); }, { once: true });
+    return;
+  }
+  host.querySelector('img.g-sc-shot')?.remove(); hero.classList.remove('still');
   const f = S.f, found = S.log.filter((e) => e.hit).map((e) => A.ING[e.id]).slice(-3).reverse();
   A.getStage().then((st) => {
     if (!st || !host.isConnected) { hero.classList.add('no-3d'); return; }
@@ -833,7 +851,8 @@ function scentChoreo() {
 function scentShare() {
   const total = S.notes.filter((x) => x.id).length;
   const pts = scentPoints([...S.found], S.lives, total).total;
-  return `Fraguessr ${S.daily ? dailyName(S.date) : 'practice scent'}\n${S.f.name}: ${S.found.size}/${total} notes · ${pts.toLocaleString('en')} pts\n${S.log.map((e) => (e.hit ? rareOf(e.id).sq : '🟥')).join('')}${'💧'.repeat(S.lives)}\n${SITE}`;
+  const b = S.daily && bonusSaved(S.date), geo = b?.done ? `\n📍 ${b.rounds.map((x) => square(x.points)).join('')} ${bonusTotal(b).toLocaleString('en')}` : '';
+  return `Fraguessr ${S.daily ? dailyName(S.date) : 'practice scent'}\n${S.f.name}: ${S.found.size}/${total} notes · ${pts.toLocaleString('en')} pts\n${S.log.map((e) => (e.hit ? rareOf(e.id).sq : '🟥')).join('')}${'💧'.repeat(S.lives)}${geo}\n${SITE}`;
 }
 // ── everyone today: shared counts from other players, once Firebase is set up (stats.js) ──
 async function scentWorld() {
@@ -868,21 +887,23 @@ function scentRender() {
   const until = Math.max(1, Math.ceil((Date.parse(S.date) + 864e5 - Date.now()) / 6e4)), cards = S.log.filter((e) => e.hit);
   gameEl.innerHTML = `
     <div class="game g-scent">
-      <div class="detail-top"><button class="btn icon ghost" data-act="exit" aria-label="Back to the atlas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-        <div class="crumbs"><span>Fraguessr</span><span>/</span><b>${S.daily ? dailyName(S.date) : 'Practice scent'}</b></div>
+      <div class="detail-top">${S.daily ? '' : '<button class="btn icon ghost" data-act="exit" aria-label="Back to the atlas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>'}
+        <div class="crumbs"><b>${S.daily ? dailyName(S.date) : 'Practice scent'}</b></div>
         <span class="g-drops g-total" data-sc-lives role="img" aria-label="${S.lives} chances left">${scentDrops()}</span></div>
-      <div class="hero frag" id="g-hero"><div class="model"></div><span class="badge glass tag mono">${A.esc(f.house)} · ${f.year}</span><span class="badge glass tag2 mono">Drag to turn</span></div>
+      <div class="hero frag g-sc-hero" id="g-hero"><div class="model"></div></div>
       <div class="body">
-        <div><span class="mono g-kicker">${S.daily ? 'Today’s scent' : 'Practice scent'}</span><h2 class="title">${A.esc(f.name)}</h2><div class="latin" style="font-style:normal">${A.esc(f.house)} · ${f.year} · ${A.esc(f.perfumer)}</div></div>
-        <div class="badges"><span class="badge accent" style="text-transform:capitalize">${A.esc(prof.genre)}</span>${prof.fams.slice(0, 3).map(({ fm }) => `<span class="badge"><span class="dot" style="background:${famHex(fm)}"></span>${FAMILIES[fm].label}</span>`).join('')}<span class="badge soft">${A.esc(f.audience === 'Unisex' ? 'Unisex' : f.audience === 'Men' ? 'Masculine' : 'Feminine')}</span><span class="badge soft">${Math.floor(f.year / 10) * 10}s</span></div>
+        <div class="g-sc-head"><h2 class="title">${A.esc(f.name)}</h2><div class="g-sc-meta">${A.esc(f.house)} · ${f.year} · ${A.esc(f.audience === 'Unisex' ? 'Unisex' : f.audience === 'Men' ? 'Masculine' : 'Feminine')}</div></div>
+        <div class="badges"><span class="badge accent" style="text-transform:capitalize">${A.esc(prof.genre)}</span>${prof.fams.slice(0, 3).map(({ fm }) => `<span class="badge"><span class="dot" style="background:${famHex(fm)}"></span>${FAMILIES[fm].label}</span>`).join('')}</div>
         <div class="g-sc-prof" role="img" aria-label="Scent profile: ${prof.fams.map(({ fm, p }) => `${FAMILIES[fm].label} ${Math.round(p * 100)}%`).join(', ')}">${prof.fams.map(({ fm, p }) => `<i style="--c:${famHex(fm)};--p:${p}" title="${FAMILIES[fm].label} ${Math.round(p * 100)}%"></i>`).join('')}</div>
-        <p class="prose">${A.esc(prof.text)}</p>
         ${done ? `<div class="g-sc-end">
           <div class="g-sc-score"><div class="g-big mono"><b data-n>${got}</b><span>/${total}</span></div><div><h2 class="title">${verdict}</h2><p class="prose">${line}</p></div></div>
           <div class="g-meter"><i style="--p:${got / total}"></i></div>
           ${(() => { const p = scentPoints([...S.found], S.lives, total), best = S.daily ? dailyStats().bestScore : 0; return `<div class="g-sc-pts"><span class="muted">Score</span><b class="mono">${p.total.toLocaleString('en')}</b><span class="muted">${p.bonus ? `incl. ${p.bonus} for drops left` : 'rarer notes score more'}${best > p.total ? ` · best ${best.toLocaleString('en')}` : best && best === p.total && dailyStats().played > 1 ? ' · your best' : ''}</span></div>`; })()}
+          <div class="g-sc-cta"><button class="btn primary" data-act="scent-share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>Share result</button>${S.daily ? `<button class="btn" data-act="stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</button>` : ''}</div>
+          <div class="g-share" hidden><code id="g-sharetext">${A.esc(scentShare())}</code></div>
           ${S.daily && Stats.enabled() ? worldHtml() : ''}
           <p class="g-note muted">${S.daily ? `${streak?.last === S.date && streak.n > 1 ? `${streak.n}-day streak. ` : ''}Today’s scent is played. The next one arrives in ${until >= 60 ? `${Math.floor(until / 60)} h ` : ''}${until % 60} min.` : 'Practice scents don’t count toward the daily streak.'}</p>
+          ${S.daily ? bonusCard() : ''}
           ${(() => { const n = A.nextMilestone?.(); return n ? `<div class="g-sc-next"><span class="mono">Next milestone</span><b>${A.esc(n.name)}</b><span>${A.esc(n.goal)} · ${n.have.toLocaleString()} of ${n.need.toLocaleString()} · pays a bonus ${n.reward} fact</span><i style="--p:${Math.round(100 * n.have / n.need)}%"></i></div>` : ''; })()}
         </div>` : ''}
         <div class="section-h"><span>Notes</span><span class="mono muted" data-sc-count>${got} of ${total} found</span></div>
@@ -896,13 +917,11 @@ function scentRender() {
         ${done ? `${cards.length ? `<div class="section-h"><span>Facts from today</span><span class="mono muted">${A.facts.count().toLocaleString()} / ${A.facts.total.toLocaleString()} collected</span></div>
           <div class="notes g-sc-cards">${cards.map((c) => `<button class="badge note g-sc-card${c.id === S.last?.id ? ' on' : ''}" data-act="scent-fact" data-id="${c.id}" data-r="${c.r}" style="--r:${RARITY[c.r].col}"><span class="fc-pips">${'<i></i>'.repeat(RARITY[c.r].pips)}</span>${A.esc(A.ING[c.id].name)}</button>`).join('')}</div>` : ''}
           <div class="section-h"><span>About ${A.esc(f.name)}</span></div><p class="prose">${A.esc(A.describe(f).text)}</p>
-          <div class="g-share"><code id="g-sharetext">${A.esc(scentShare())}</code></div>
-          <div class="g-actions"><button class="btn" data-act="scent-share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy result</button>
-            <button class="btn primary" data-act="collection">See your collection</button></div>
-          <button class="btn ghost" data-act="exit">Back to the atlas</button>`
+          <div class="g-more"><button class="btn ghost" data-act="exit">Explore the atlas</button><button class="btn ghost" data-act="collection">Your collection</button><button class="btn ghost" data-act="games">Practice games</button></div>`
         : `<div class="section-h"><span>Hints</span><span class="mono muted" data-sc-hcount>${hintCount()}</span></div>
           <div class="g-sc-hints" data-sc-hints>${scentHints()}</div>
           <div class="g-sc-tried notes" data-sc-tried>${scentTried()}</div>
+          <div class="section-h"><span>The scent</span></div><p class="prose">${A.esc(prof.text)}</p>
           <button class="btn ghost g-sc-quit" data-act="scent-giveup">Give up and reveal the notes</button>`}
       </div>
     </div>`;
@@ -1056,6 +1075,37 @@ export function openStats() {
       ${played ? '<button class="btn primary" data-sheet="share" autofocus><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg><span>Share</span></button>' : '<button class="btn primary" data-sheet="play" autofocus>Play today’s scent</button>'}</div>
     ${s.played ? '' : '<p class="sheet-foot muted">Your numbers start with your first daily scent. They are kept in this browser.</p>'}`, 'stats');
 }
+// ── daily bonus: pin three of today's notes on the globe, GeoGuessr style ──
+const BONUS_ROUNDS = 3;
+function bonusRounds(date) {
+  const f = scentOf(date), r = rng(hash('fraguessr:geo:' + date)), ids = [...new Set(scentNotes(f).filter((x) => x.id).map((x) => x.id))];
+  for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
+  // prefer notes from different countries, so the three pins spread over the map
+  const out = [], seen = new Set();
+  for (const id of ids) if (out.length < BONUS_ROUNDS && !seen.has(ING_BY[id].country)) { out.push(id); seen.add(ING_BY[id].country); }
+  for (const id of ids) if (out.length < BONUS_ROUNDS && !out.includes(id)) out.push(id);
+  return out.map((id) => ({ ing: ING_BY[id] }));
+}
+// today's bonus so far: { rounds: [{ id, guess, km, points }], done }
+const bonusSaved = (date) => store.get(`geo:${date}`);
+const bonusTotal = (b) => (b?.rounds || []).reduce((a, x) => a + x.points, 0);
+function startBonus() {
+  const date = today(), saved = bonusSaved(date), rounds = bonusRounds(date);
+  S = rules({ mode: 'notes', timed: false, seed: hash(date), rounds, i: -1, results: [], total: 0, bonus: date });
+  // a round already locked in today stays as it was
+  for (const x of saved?.rounds || []) { const R = rounds[S.results.length]; if (!R || R.ing.id !== x.id) break; S.results.push({ ing: R.ing, guess: x.guess, km: x.km, points: x.points, clues: 0, sc: scoreRound({ km: x.km, clues: 0, free: 0 }) }); S.total += x.points; }
+  S.i = S.results.length - 1;
+  A.setHash('play-daily');
+  if (saved?.done || S.results.length >= rounds.length) return summary();
+  next();
+}
+function bonusCard() {
+  const b = bonusSaved(S.date), n = BONUS_ROUNDS, max = (n * MAX).toLocaleString('en');
+  if (b?.done) return `<div class="g-bonus-card done"><div><span class="mono">Daily bonus</span><b>${bonusTotal(b).toLocaleString('en')} <em>/ ${max}</em></b><span>${b.rounds.map((x) => square(x.points)).join('')} You pinned ${n} of today’s notes.</span></div><button class="btn" data-act="bonus">See it</button></div>`;
+  const started = b?.rounds?.length;
+  return `<div class="g-bonus-card"><div><span class="mono">Daily bonus</span><b>Where do they grow?</b><span>${started ? `${b.rounds.length} of ${n} pinned so far.` : `Pin ${n} of today’s notes on the globe. Up to ${max} points, GeoGuessr style.`}</span></div><button class="btn primary" data-act="bonus">${started ? 'Carry on' : 'Play'}</button></div>`;
+}
+
 // back to today's scent from anywhere in the game
 export function showDaily() {
   if (!A) return;
@@ -1095,6 +1145,9 @@ function onPanelClick(e) {
   else if (act === 'lobby') lobby(S?.mode, S?.mp ? (S.mp.kind === 'local' ? 'local' : 'online') : null);
   else if (act === 'start') start();
   else if (act === 'scent') scentOpen(true);
+  else if (act === 'bonus') startBonus();
+  else if (act === 'games') { S = null; lobby(); }
+  else if (act === 'stats') openStats();
   else if (act === 'scent-guess') scentGuess(gameEl.querySelector('[data-sc-in]')?.value || '');
   else if (act === 'scent-pick') scentGuess(b.dataset.label, b.dataset.id);
   else if (act === 'scent-giveup') { if (b.dataset.sure) scentGiveUp(); else { b.dataset.sure = '1'; b.textContent = 'Tap again to reveal every note'; } }
@@ -1124,9 +1177,9 @@ function copyText(t, b, done, fail) {
   const p = navigator.clipboard?.writeText(t);
   if (p) p.then(ok, () => fail?.()); else fail?.();
 }
-function selectShare() { const el = gameEl.querySelector('#g-sharetext'); if (!el) return; const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
+function selectShare() { const el = gameEl.querySelector('#g-sharetext'); if (!el) return; el.parentElement.hidden = false; const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
 function onKey(e) {
-  if (e.key === 'Escape') { if (S && S.kind !== 'scent' && S.phase !== 'done') lobby(S.mode); else leave(); return; }
+  if (e.key === 'Escape') { if (S?.bonus || (S && S.kind !== 'scent' && S.phase !== 'done')) lobby(S.mode); else leave(); return; }
   if (e.key !== 'Enter' && e.key !== ' ') return;
   if (e.target.closest?.('button, input')) return;
   if (S?.phase === 'guess' && S.guess) { e.preventDefault(); submit(); }
@@ -1505,6 +1558,7 @@ function advance() {
   pub({ gm: NET.gm }); onNet();
 }
 function playAgain() {
+  if (S?.bonus) return lobby();
   if (S?.mp?.kind === 'online') { if (NET?.host) { NET.gm = { id: newId(), mode: NET.gm.mode, seed: newSeed(), n: 0, ph: 'play' }; pub({ gm: NET.gm }); onNet(); } return; }
   if (S?.mp?.kind === 'local') return startLocal(S.mode, S.timed);
   again();

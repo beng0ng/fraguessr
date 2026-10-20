@@ -63,14 +63,16 @@ function setTheme(v, save = true) {
   if (save) try { localStorage.setItem('noteguessr:theme', v); } catch {}
 }
 function placeThemePill() {
-  const b = themeSeg.querySelector('[aria-checked="true"]'); if (!b) return;
+  let b = themeSeg.querySelector('[aria-checked="true"]'); if (!b) return;
+  // phones hide the Auto button, so the pill marks whichever theme the system is showing
+  if (!b.offsetWidth) b = themeSeg.querySelector(`[data-theme-v="${matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'}"]`);
   themePill.style.width = b.offsetWidth + 'px'; themePill.style.transform = `translateX(${b.offsetLeft - 3}px)`;
 }
 themeSeg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.themeV); });
 let savedTheme = 'auto'; try { savedTheme = localStorage.getItem('noteguessr:theme') || 'auto'; } catch {}
 setTheme(['light', 'dark', 'auto'].includes(savedTheme) ? savedTheme : 'auto', false);
 new ResizeObserver(placeThemePill).observe(themeSeg);
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyGlobeTheme(); refreshThemed(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { applyGlobeTheme(); refreshThemed(); placeThemePill(); });
 new MutationObserver(() => { applyGlobeTheme(); refreshThemed(); }).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
 // the 3D studio and bottle thumbnails are lit for the current theme
 function refreshThemed() {
@@ -832,6 +834,8 @@ if (new URLSearchParams(location.search).has('prerender')) {
   window.prerenderThumbs = () => getModels().then((m) => Promise.all([
     ...(keys.includes('i') ? INGREDIENTS.map((i) => m.thumbnail(`i:${i.id}`, m.thumbBuilders.ingredient(i))) : []),
     ...(keys.includes('f') ? FRAGRANCES.map((f) => m.thumbnail(`f:${f.id}:${isDark() ? 'd' : 'l'}`, m.thumbBuilders.fragrance(f, liquidFor(f), fragHex(f)), sweepFor(fragHex(f)))) : []),
+    // the daily bottles, larger and on a clear background so they sit on either theme
+    ...(keys.includes('h') ? [import('./game.js').then((g) => Promise.all(g.scentPoolIds().map((id) => m.thumbnail(`h:${id}`, m.thumbBuilders.fragrance(FRAG[id], liquidFor(FRAG[id]), fragHex(FRAG[id])), null, { size: 480 }))))] : []),
   ]).then(() => m.renderedThumbs));
 }
 
@@ -945,10 +949,10 @@ function setTint(hex, palette) {
   const [ar, ag, ab] = hexRgb(acc);
   root.style.setProperty('--accent-fg', (0.299 * ar + 0.587 * ag + 0.114 * ab) / 255 > 0.6 ? '#111111' : '#ffffff');
   root.style.setProperty('--accent-soft', `rgba(${r},${g},${b},0.16)`);
-  root.style.setProperty('--tint', `rgba(${r},${g},${b},0.22)`);
+  root.style.setProperty('--tint', `rgba(${r},${g},${b},0.13)`);
   const p2 = hexRgb(palette?.[1] || hex), p3 = hexRgb(palette?.[2] || hex);
-  root.style.setProperty('--tint-2', `rgba(${p2},0.18)`);
-  root.style.setProperty('--tint-3', `rgba(${p3},0.16)`);
+  root.style.setProperty('--tint-2', `rgba(${p2},0.09)`);
+  root.style.setProperty('--tint-3', `rgba(${p3},0.08)`);
   tintRgb = [r / 255, g / 255, b / 255];
 }
 function selectIngredient(id, { fly = true, fact } = {}) {
@@ -1568,6 +1572,7 @@ function startPlay(mode) {
 // ── daily / explore switch ─────────────────────────────
 const modesEl = $('.modes');
 function markMode(m) {
+  if (m === 'explore' && !modelsPromise && THUMBS) warmModels();
   modesEl.dataset.mode = m;
   $('#m-explore').setAttribute('aria-selected', String(m === 'explore'));
   $('#play').setAttribute('aria-selected', String(m === 'play'));
@@ -1587,5 +1592,7 @@ renderList(true);
 initGlobe();
 // the daily scent is the front door; a shared link to the atlas, an ingredient or a perfume opens the atlas
 if (location.hash.length > 1 && !location.hash.startsWith('#play')) { markMode('explore'); fromHash(); } else startPlay();
-(window.requestIdleCallback || setTimeout)(() => getModels()); // warm the 3D module in the background
+// warm the 3D module in the background; the public site has every image ready-made, so it waits until the atlas is opened
+function warmModels() { (window.requestIdleCallback || setTimeout)(() => getModels()); }
+if (!THUMBS) warmModels();
 import('./sync.js').then((m) => m.startSync({ onAdopt: adoptSaved, onState: setSyncState })).then((s) => { sync = s; }).catch(() => {});
