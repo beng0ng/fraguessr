@@ -1,7 +1,7 @@
 // cobe draws its land dots with a fixed radius (and indexes at most 32,768 samples); when the source can be patched,
 // the radius shrinks with zoom so dots stay small on screen
 const COBE_URL = 'https://cdn.jsdelivr.net/npm/cobe@2.0.1/dist/index.esm.js';
-let cobeReady = null; // one load of the (patched) library, shared by the main globe and the welcome globe
+let cobeReady = null; // one load of the (patched) library
 async function loadCobe() {
   try {
     const src = await (await fetch(COBE_URL)).text();
@@ -74,8 +74,6 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { ap
 new MutationObserver(() => { applyGlobeTheme(); refreshThemed(); }).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
 // the 3D studio and bottle thumbnails are lit for the current theme
 function refreshThemed() {
-  // the welcome globe and bottle are drawn per theme (guarded: the first theme change can land before they exist)
-  try { if (!welcome.hidden) { wGlobe?.stop(); welcomeGlobe(); welcomeScent(); } } catch {}
   if (tab === 'frag') { const y = listEl.scrollTop; renderList(); listEl.scrollTop = y; }
   const h = detailEl.querySelector('#hero');
   if (h && sel.ing) heroFor('ing', h, { vig: sel.ing, ing: sel.ing });
@@ -195,7 +193,6 @@ const labelEls = new Map();
 let pinEl = null, pinFor = null, lastT = performance.now();
 // on a phone the globe scrolls out of view under the list; while it is off screen it isn't redrawn
 let stageSeen = true, lastInput = 0, frameNo = 0;
-const welcomeEl = document.getElementById('welcome');
 for (const ev of ['pointerdown', 'pointermove', 'wheel']) stage.addEventListener(ev, () => { lastInput = performance.now(); }, { passive: true });
 new IntersectionObserver(([e]) => { stageSeen = e.isIntersecting; }).observe(stage);
 function tick(now) {
@@ -211,10 +208,9 @@ function tick(now) {
     view.theta = Math.max(-1.2, Math.min(1.2, view.theta));
   }
   view.scale += (view.tScale - view.scale) * k;
-  // while the welcome covers the globe nothing is redrawn, and while it only drifts on its own
-  // (no hand on it, no flight or zoom under way) it is redrawn every other frame
+  // while the globe only drifts on its own (no hand on it, no flight or zoom under way) it is redrawn every other frame
   const idle = !dragging && view.tPhi == null && Math.abs(view.tScale - view.scale) < 0.002 && now - lastInput > 1500 && now - selAt > 1600 && !play.active;
-  if (!welcomeEl.hidden && !welcomeEl.classList.contains('out') || (idle && (++frameNo & 1))) { requestAnimationFrame(tick); return; }
+  if (idle && (++frameNo & 1)) { requestAnimationFrame(tick); return; }
   const upd = { phi: view.phi, theta: view.theta, scale: view.scale * fit, mapSamples: fineDots ? 32000 : Math.round(Math.min(32000, 22000 * view.scale ** 1.2)) };
   const m = refreshMarkers(false); if (m) Object.assign(upd, m);
   // ease the globe's glow and base toward the selected ingredient's color
@@ -574,7 +570,6 @@ for (const [name, loc, z] of REGIONS) {
 let tab = 'ing', fragSort = 'family';
 const listEl = $('#view-list'), detailEl = $('#view-detail'), filterEl = $('#filter');
 $('#count-ing').textContent = INGREDIENTS.length; $('#count-frag').textContent = FRAGRANCES.length;
-$('#stats').textContent = `${INGREDIENTS.length} ingredients · ${FRAGRANCES.length} fragrances · ${new Set(INGREDIENTS.map((i) => i.country)).size} countries`;
 function setTab(t) {
   if (tab === 'col' && t !== 'col') markSeen();
   tab = t; $('#tab-ing').setAttribute('aria-selected', t === 'ing'); $('#tab-frag').setAttribute('aria-selected', t === 'frag'); $('#tab-col').setAttribute('aria-selected', t === 'col');
@@ -1523,6 +1518,7 @@ cList.addEventListener('mousemove', (e) => { const it = e.target.closest('.cmdk-
 cmdk.addEventListener('click', (e) => { if (e.target === cmdk) closeCmdk(); });
 $('#open-search').addEventListener('click', openCmdk);
 addEventListener('keydown', (e) => {
+  if (document.querySelector('dialog[open]')) return; // a sheet handles its own keys
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); cmdk.classList.contains('open') ? closeCmdk() : openCmdk(); }
   else if (e.key === '/' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); openCmdk(); }
   else if (play.active) play.onKey?.(e);
@@ -1564,12 +1560,12 @@ function startPlay(mode) {
     describe: describeFragrance, facts: { draw: drawFact, discover, earn, mount: mountFact, total: FACT_TOTAL, count: () => seenFacts.size }, notes: { collect: collectNote, count: () => myNotes.size }, milestones: checkMilestones, saved: dirty, nextMilestone: () => { const n = nextMilestone(); return n && { name: n.m.name, goal: n.m.goal, have: n.have, need: n.need, reward: RARITY[n.m.reward].label.toLowerCase() }; },
     collection: () => { setTab('col'); },
     els: { stage, labels: labelsEl, app: $('.app'), panel: $('.panel'), views: $('.views'), list: listEl, detail: detailEl },
-    exit: () => { play.active = false; markerKey = ''; setTint(null); $('.app').classList.remove('playing'); $('.panel').classList.remove('playing'); if (tab === 'col') renderList(true); showList(); setHash(''); view.tScale = 1; autoSpin = true; markMode('explore'); },
+    exit: () => { play.active = false; markerKey = ''; setTint(null); $('.app').classList.remove('playing'); $('.panel').classList.remove('playing'); if (tab === 'col') renderList(true); showList(); setHash('atlas'); view.tScale = 1; autoSpin = true; markMode('explore'); },
   }, mode));
   markMode('play');
 }
 
-// ── explore / play switch and the welcome chooser ───────
+// ── daily / explore switch ─────────────────────────────
 const modesEl = $('.modes');
 function markMode(m) {
   modesEl.dataset.mode = m;
@@ -1579,72 +1575,17 @@ function markMode(m) {
 function explore() { if (play.active) gamePromise?.then((g) => g.closeGame()); markMode('explore'); }
 $('#m-explore').addEventListener('click', explore);
 $('#play').addEventListener('click', () => (play.active ? null : startPlay()));
-const welcome = $('#welcome');
-function showWelcome() {
-  $('#w-sub').textContent = `${INGREDIENTS.length} perfume ingredients from ${new Set(INGREDIENTS.map((i) => i.country)).size} countries, traced into ${FRAGRANCES.length} well-known fragrances.`;
-  welcome.hidden = false; welcome.classList.remove('out');
-  // it is a modal: the page behind it is inert, and focus starts inside it so Tab reaches its cards
-  $('.app').inert = true; welcome.tabIndex = -1; welcome.focus({ preventScroll: true });
-  if (!reduceMotion && !globe) view.scale = 0.55; // on first load the globe grows in behind the veil
-  welcomeGlobe(); welcomeScent();
-}
-// the Explore card: a small live globe of every ingredient, turning slowly
-let wGlobe = null;
-async function welcomeGlobe() {
-  const host = $('#w-globe'); if (!host || wGlobe) return;
-  const createGlobe = (await import('cobe')).default; if (welcome.hidden || wGlobe) return;
-  const cv = document.createElement('canvas'), size = host.clientWidth || 120; host.append(cv);
-  let phi = view.phi, raf = 0;
-  const g = createGlobe(cv, { devicePixelRatio: 2, width: size, height: size, phi, theta: 0.32, scale: 1, mapSamples: 7000, ...themeOpts(), mapBrightness: isDark() ? 4 : 2.2, diffuse: 1.6,
-    markers: BY_USE.map((i) => ({ location: i.loc, size: 0.018 + Math.sqrt(USES[i.id].length) * 0.004, color: ingRgb(i) })), markerElevation: 0, opacity: 1 });
-  const spin = () => { phi += reduceMotion ? 0 : 0.0045; g.update({ phi }); raf = requestAnimationFrame(spin); };
-  spin(); requestAnimationFrame(() => host.classList.add('ready'));
-  wGlobe = { stop: () => { cancelAnimationFrame(raf); g.destroy?.(); host.classList.remove('ready'); host.replaceChildren(); wGlobe = null; } };
-}
-// the Daily scent card: today's real bottle, rendered in the 3D studio
-function welcomeScent() {
-  gamePromise ||= import('./game.js');
-  gamePromise.then((m) => {
-    const f = m.todayScent?.(); if (!f) return;
-    $('#w-today').innerHTML = `Today · <b>${esc(f.name)}</b> · ${esc(f.house)}`;
-    // the three sample notes flipping over are never in today's scent, so the card gives nothing away
-    const demo = ['bergamot', 'rose', 'vanilla', 'lemon', 'jasmine', 'tonka', 'lavender', 'iris', 'sandalwood', 'vetiver', 'patchouli', 'oud', 'cedar', 'neroli'].filter((id) => ING[id] && !f.ingredients.includes(id));
-    welcome.querySelectorAll('.w-note').forEach((el, k) => { const ing = ING[demo[k]]; if (!ing) return; el.style.setProperty('--c', ingHex(ing)); el.querySelector('em').textContent = { rose: 'Rose', iris: 'Iris', neroli: 'Neroli', cedar: 'Cedar', tonka: 'Tonka' }[ing.id] || ing.name; });
-    const art = $('.w-scent'), key = `w:${f.id}`;
-    if (art.dataset.key === key) return;
-    getModels().then((mm) => mm?.thumbnail(key, mm.thumbBuilders.fragrance(f, liquidFor(f), fragHex(f)), null, { size: 420, first: true })).then((url) => {
-      if (!url) return;
-      art.dataset.key = key; art.style.setProperty('--sig', fragHex(f));
-      const img = art.querySelector('.w-shot') || art.appendChild(Object.assign(new Image(), { className: 'w-shot', alt: '' }));
-      img.onload = () => art.classList.add('real'); img.src = url;
-    });
-  });
-}
-function hideWelcome() {
-  if (welcome.hidden) return;
-  welcome.classList.add('out');
-  if (!reduceMotion) view.scale *= 0.8; // the globe settles forward as the veil lifts
-  $('.app').inert = false;
-  setTimeout(() => { welcome.hidden = true; welcome.classList.remove('out'); wGlobe?.stop(); }, 420);
-}
-welcome.addEventListener('click', (e) => {
-  const t = e.target.closest('[data-go]'); if (!t) return;
-  e.stopPropagation();
-  const go = t.dataset.go;
-  hideWelcome();
-  if (go === 'explore') explore();
-  else startPlay(go.split('-')[1]);
-});
-addEventListener('keydown', (e) => { if (e.key === 'Escape' && !welcome.hidden) hideWelcome(); });
-$('.brand').addEventListener('click', showWelcome);
+// the brand leads back to today's scent; help and stats live in the game module
+$('.brand').addEventListener('click', () => (play.active ? gamePromise.then((m) => m.showDaily()) : startPlay()));
+const withGame = (fn) => () => { gamePromise ||= import('./game.js'); gamePromise.then(fn); };
+$('#open-help').addEventListener('click', withGame((m) => m.openHelp()));
+$('#open-stats').addEventListener('click', withGame((m) => m.openStats()));
 
 // ── boot ───────────────────────────────────────────────
 new ResizeObserver(() => { size(); world.resize(); resizeDots(); globe?.update(globeSize()); }).observe(stage);
 renderList(true);
 initGlobe();
-if (location.hash.length > 1) fromHash(); else showWelcome();
-// a card picked on the welcome before this code arrived
-welcome.dataset.ready = '1';
-if (welcome.dataset.pending) { const go = welcome.dataset.pending; delete welcome.dataset.pending; hideWelcome(); if (go === 'explore') explore(); else startPlay(go.split('-')[1]); }
+// the daily scent is the front door; a shared link to the atlas, an ingredient or a perfume opens the atlas
+if (location.hash.length > 1 && !location.hash.startsWith('#play')) { markMode('explore'); fromHash(); } else startPlay();
 (window.requestIdleCallback || setTimeout)(() => getModels()); // warm the 3D module in the background
 import('./sync.js').then((m) => m.startSync({ onAdopt: adoptSaved, onState: setSyncState })).then((s) => { sync = s; }).catch(() => {});

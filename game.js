@@ -128,6 +128,7 @@ export function openGame(api, mode) {
   A.play.markers = markers; A.play.arcs = arcs;
   // Play is the daily scent, one per day; a finished day reopens on its end screen
   scentOpen(true);
+  if (!store.get('help')) setTimeout(() => { if (S?.kind === 'scent' && !document.querySelector('dialog[open]')) openHelp(); }, 1400);
   // keyboard players can start typing notes straight away; on touch screens the keyboard waits for a tap
   const first = matchMedia('(hover: none)').matches ? gameEl.querySelector('[data-act="exit"]') : gameEl.querySelector('[data-sc-in]') || gameEl.querySelector('[data-act="exit"]');
   first?.focus({ preventScroll: true });
@@ -539,6 +540,13 @@ const SCENT_POOL = ['chanel-no-5', 'chanel-coco-mademoiselle', 'chanel-bleu-de-c
   'amouage-interlude-man', 'acqua-di-parma-colonia', 'ralph-lauren-polo', 'givenchy-l-interdit', 'givenchy-gentleman-eau-de-parfum', 'givenchy-pi', 'chloe-chloe-eau-de-parfum', 'burberry-her', 'montblanc-explorer', 'montblanc-legend',
   'nina-ricci-l-air-du-temps', 'ariana-grande-cloud', 'kayali-vanilla-28', 'valentino-born-in-roma-donna', 'azzaro-wanted', 'azzaro-pour-homme', 'dkny-be-delicious', 'lanvin-arpege', 'jean-patou-joy', 'robert-piguet-fracas',
   'cacharel-anais-anais', 'lolita-lempicka-lolita-lempicka', 'guy-laroche-drakkar-noir', 'lattafa-khamrah', 'armaf-club-de-nuit-intense-man', 'carolina-herrera-bad-boy', 'elizabeth-arden-green-tea', 'britney-spears-fantasy', 'nautica-nautica-voyage'];
+// rarer notes score more, like a rare answer: how rare a note is = how few of the atlas's perfumes list it
+const RARE = [[60, 'Classic', 100, '🟩'], [25, 'Common', 150, '🟩'], [8, 'Uncommon', 250, '🟦'], [0, 'Rare', 400, '🟪']], DROP_BONUS = 50;
+let useN = null;
+const usesOf = (id) => (useN ||= FRAGRANCES.reduce((m, f) => { for (const i of new Set(f.ingredients)) m[i] = (m[i] || 0) + 1; return m; }, {}))[id] || 0;
+const rareOf = (id) => { const n = usesOf(id), [, label, pts, sq] = RARE.find(([k]) => n >= k); return { label, pts, sq, pct: Math.max(1, Math.round(100 * n / FRAGRANCES.length)) }; };
+// the day's score: every note found by its rarity, plus a bonus for each drop left when every note is found
+function scentPoints(found, lives, total) { const notes = found.reduce((a, id) => a + rareOf(id).pts, 0); return { notes, bonus: found.length === total ? lives * DROP_BONUS : 0, total: notes + (found.length === total ? lives * DROP_BONUS : 0) }; }
 const TIER_NAME = { top: 'Top', heart: 'Heart', base: 'Base' };
 const SMELL = {
   top: { citrus: 'a bright, zesty burst', floral: 'a soft floral lift', green: 'a crisp green snap', fruit: 'a juicy, fruity splash', spice: 'a warm, peppery spark', wood: 'a dry woody hush', resin: 'a glowing balsamic warmth', gourmand: 'a sweet, edible hello', animalic: 'a skin-warm musky hum', marine: 'a breezy, salty splash' },
@@ -633,7 +641,7 @@ function scentOpen(daily, fid) {
   A.setTint(A.fragHex(f));
   A.play.ver++; A.refresh();
   if (S.phase === 'done') scentFinish(true);
-  else { scentRender(); scentPins(null); scentLinks(null); A.flyTo([24, 20], 1); showSplash(`<span class="mono">${daily ? `Daily scent · ${dayLabel(d)}` : 'Practice scent'}</span><b>${A.esc(f.name)} <span class="g-sp-h">${A.esc(f.house)}</span></b>`); }
+  else { scentRender(); scentPins(null); scentLinks(null); A.flyTo([24, 20], 1); showSplash(`<span class="mono">${daily ? dailyName(d) : 'Practice scent'}</span><b>${A.esc(f.name)} <span class="g-sp-h">${A.esc(f.house)}</span></b>`); }
 }
 // one guess, live or replayed from today's saved log
 function scentApply(e, quiet) {
@@ -677,7 +685,8 @@ function scentGuess(raw, id) {
     A.flyTo(ing.loc, 1.5);
     fxItems.push({ type: 'burst', loc: ing.loc, t0: t, color: col, parts: sparks(26) }, { type: 'float', loc: ing.loc, t0: t, text: ing.name, color: col });
     scentPins(x.id); scentLinks(x.id);
-    say.innerHTML = `<b>${A.esc(x.n.charAt(0).toUpperCase() + x.n.slice(1))}</b> is in it, ${an(x.t)} note from ${A.esc(ing.country)}. You found ${an(RARITY[r].label.toLowerCase())} fact${isNew ? '' : ' you already had'}${drops ? ` and <b class="g-drops-won">${drops} drops</b> of ${A.esc(x.n)} essence` : ''}.`;
+    const rr = rareOf(x.id);
+    say.innerHTML = `<span class="g-pts r-${rr.label.toLowerCase()}">+${rr.pts}</span><b>${A.esc(x.n.charAt(0).toUpperCase() + x.n.slice(1))}</b> is in it, ${an(x.t)} note from ${A.esc(ing.country)}. ${rr.label === 'Rare' || rr.label === 'Uncommon' ? `A ${rr.label.toLowerCase()} find: only ${rr.pct}% of perfumes list it.` : `${rr.label} note, in ${rr.pct}% of perfumes.`} You found ${an(RARITY[r].label.toLowerCase())} fact${isNew ? '' : ' you already had'}${drops ? ` and <b class="g-drops-won">${drops} drops</b> of ${A.esc(x.n)} essence` : ''}.`;
     say.className = 'g-sc-say hit';
   } else {
     scentApply({ id: res.miss, hit: 0 });
@@ -749,7 +758,7 @@ function scentChip(x) {
   const ing = A.ING[x.id];
   const pct = S.phase === 'done' && S.world?.n ? Math.round(100 * (S.world.notes[x.id] || 0) / S.world.n) : null;
   const share = pct == null ? '' : `<em class="g-pct" title="Found by ${pct}% of today’s players">${pct}%</em>`;
-  if (S.found.has(x.id)) return `<span class="badge note tinted g-sc-n${S.fresh === x.id ? ' pop' : ''}" data-id="${x.id}" style="--c:${A.ingHex(ing)}"><span class="dot" style="background:${A.ingHex(ing)}"></span>${A.esc(x.n)}${share}</span>`;
+  if (S.found.has(x.id)) { const rr = rareOf(x.id); return `<span class="badge note tinted g-sc-n${S.fresh === x.id ? ' pop' : ''}" data-id="${x.id}" style="--c:${A.ingHex(ing)}" title="${rr.label}: in ${rr.pct}% of perfumes"><span class="dot" style="background:${A.ingHex(ing)}"></span>${A.esc(x.n)}<em class="g-chip-pts">${rr.pts}</em>${share}</span>`; }
   if (S.phase === 'done') return `<span class="badge note g-sc-n missed" data-id="${x.id}" title="Not found"><span class="dot" style="background:${A.ingHex(ing)}"></span>${A.esc(x.n)}${share}</span>`;
   const lv = S.level[x.id] || 0, col = lv ? famHex(ing.family) : '';
   return `<span class="badge note g-sc-n hidden${lv ? ' hinted' : ''}${S.freshHint === x.id ? ' fresh' : ''}" data-id="${x.id}" ${lv ? `style="--c:${col}" title="Hinted: ${FAMILIES[ing.family].label.toLowerCase()}"` : 'title="Hidden note"'}>${lv ? `<span class="dot" style="background:${col}"></span>` : ''}<span class="mono">${lv >= 4 ? A.esc(pattern(x.n)) : '?'}</span></span>`;
@@ -823,7 +832,8 @@ function scentChoreo() {
 }
 function scentShare() {
   const total = S.notes.filter((x) => x.id).length;
-  return `Fraguessr ${S.daily ? `daily scent · ${dayLabel(S.date)}` : 'practice scent'}\n${S.f.name}, ${S.f.house}: ${S.found.size}/${total} notes\n${S.log.map((e) => (e.hit ? '🟩' : '🟥')).join('')}\n${'💧'.repeat(S.lives)}${'▫️'.repeat(SCENT_LIVES - S.lives)}`;
+  const pts = scentPoints([...S.found], S.lives, total).total;
+  return `Fraguessr ${S.daily ? dailyName(S.date) : 'practice scent'}\n${S.f.name}: ${S.found.size}/${total} notes · ${pts.toLocaleString('en')} pts\n${S.log.map((e) => (e.hit ? rareOf(e.id).sq : '🟥')).join('')}${'💧'.repeat(S.lives)}\n${SITE}`;
 }
 // ── everyone today: shared counts from other players, once Firebase is set up (stats.js) ──
 async function scentWorld() {
@@ -859,7 +869,7 @@ function scentRender() {
   gameEl.innerHTML = `
     <div class="game g-scent">
       <div class="detail-top"><button class="btn icon ghost" data-act="exit" aria-label="Back to the atlas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-        <div class="crumbs"><span>Fraguessr</span><span>/</span><b>${S.daily ? `Daily scent · ${dayLabel(S.date)}` : 'Practice scent'}</b></div>
+        <div class="crumbs"><span>Fraguessr</span><span>/</span><b>${S.daily ? dailyName(S.date) : 'Practice scent'}</b></div>
         <span class="g-drops g-total" data-sc-lives role="img" aria-label="${S.lives} chances left">${scentDrops()}</span></div>
       <div class="hero frag" id="g-hero"><div class="model"></div><span class="badge glass tag mono">${A.esc(f.house)} · ${f.year}</span><span class="badge glass tag2 mono">Drag to turn</span></div>
       <div class="body">
@@ -870,6 +880,7 @@ function scentRender() {
         ${done ? `<div class="g-sc-end">
           <div class="g-sc-score"><div class="g-big mono"><b data-n>${got}</b><span>/${total}</span></div><div><h2 class="title">${verdict}</h2><p class="prose">${line}</p></div></div>
           <div class="g-meter"><i style="--p:${got / total}"></i></div>
+          ${(() => { const p = scentPoints([...S.found], S.lives, total), best = S.daily ? dailyStats().bestScore : 0; return `<div class="g-sc-pts"><span class="muted">Score</span><b class="mono">${p.total.toLocaleString('en')}</b><span class="muted">${p.bonus ? `incl. ${p.bonus} for drops left` : 'rarer notes score more'}${best > p.total ? ` · best ${best.toLocaleString('en')}` : best && best === p.total && dailyStats().played > 1 ? ' · your best' : ''}</span></div>`; })()}
           ${S.daily && Stats.enabled() ? worldHtml() : ''}
           <p class="g-note muted">${S.daily ? `${streak?.last === S.date && streak.n > 1 ? `${streak.n}-day streak. ` : ''}Today’s scent is played. The next one arrives in ${until >= 60 ? `${Math.floor(until / 60)} h ` : ''}${until % 60} min.` : 'Practice scents don’t count toward the daily streak.'}</p>
           ${(() => { const n = A.nextMilestone?.(); return n ? `<div class="g-sc-next"><span class="mono">Next milestone</span><b>${A.esc(n.name)}</b><span>${A.esc(n.goal)} · ${n.have.toLocaleString()} of ${n.need.toLocaleString()} · pays a bonus ${n.reward} fact</span><i style="--p:${Math.round(100 * n.have / n.need)}%"></i></div>` : ''; })()}
@@ -965,6 +976,100 @@ function scentCard() {
     </button>`;
 }
 
+// ── daily number, stats and how to play ──────────────────
+const LAUNCH = '2026-10-20', SITE = 'fraguessr.com';
+const dayNumber = (d) => Math.floor((Date.parse(d) - Date.parse(LAUNCH)) / 864e5) + 1;
+const dailyName = (d) => (dayNumber(d) >= 1 ? `Daily #${dayNumber(d)} · ${dayLabel(d)}` : `Daily · ${dayLabel(d)}`);
+// every finished daily kept in this browser: [{ date, f, total, got, lives }], oldest first
+function dailyHistory() {
+  const out = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const m = /^noteguessr:scent:(\d{4}-\d{2}-\d{2})$/.exec(localStorage.key(i) || ''); if (!m) continue;
+      const v = store.get(`scent:${m[1]}`), f = v && FRAGRANCES.find((x) => x.id === v.id);
+      if (!v?.over || !f) continue;
+      const found = v.log.filter((e) => e.hit).map((e) => e.id), lives = SCENT_LIVES - v.log.filter((e) => !e.hit).length, total = scentSize(f);
+      out.push({ date: m[1], f, total, got: found.length, lives, pts: scentPoints(found, Math.max(0, lives), total).total });
+    }
+  } catch {}
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+function dailyStats() {
+  const h = dailyHistory(), d = today(), st = store.get('scent:streak');
+  let best = 0, run = 0, prev = null;
+  for (const x of h) { run = prev && prevDay(x.date) === prev ? run + 1 : 1; best = Math.max(best, run); prev = x.date; }
+  const streak = st && (st.last === d || st.last === prevDay(d)) ? st.n : 0;
+  const buckets = [[1, 'Every note'], [0.75, '75% or more'], [0.5, '50% or more'], [0.25, '25% or more'], [0, 'Under 25%']];
+  const bucketOf = (x) => buckets.findIndex(([p]) => x.got / x.total >= p - 1e-9);
+  const dist = buckets.map(([, label], k) => ({ label, n: h.filter((x) => bucketOf(x) === k).length }));
+  const todays = h.find((x) => x.date === d);
+  return { played: h.length, perfect: h.filter((x) => x.got === x.total).length, avg: h.length ? Math.round(100 * h.reduce((a, x) => a + x.got / x.total, 0) / h.length) : 0,
+    streak, best: Math.max(best, streak), dist, mine: todays ? bucketOf(todays) : -1, todays,
+    bestScore: Math.max(0, ...h.map((x) => x.pts)), avgScore: h.length ? Math.round(h.reduce((a, x) => a + x.pts, 0) / h.length) : 0 };
+}
+const untilNext = () => { const ms = Date.parse(today()) + 864e5 - Date.now(), t = Math.max(0, Math.floor(ms / 1000)); return [Math.floor(t / 3600), Math.floor(t / 60) % 60, t % 60].map((v) => String(v).padStart(2, '0')).join(':'); };
+// one modal sheet at a time, built on <dialog> so focus, Escape and the backdrop come for free
+let sheet = null, sheetTimer = 0;
+function openSheet(html, cls) {
+  if (!sheet) {
+    sheet = document.createElement('dialog'); sheet.className = 'sheet'; document.body.append(sheet);
+    sheet.addEventListener('click', (e) => {
+      if (e.target === sheet) return sheet.close();
+      const b = e.target.closest('[data-sheet]'); if (!b) return;
+      const act = b.dataset.sheet;
+      if (act === 'close') sheet.close();
+      else if (act === 'play') { sheet.close(); if (A?.play.active) showDaily(); else document.getElementById('play')?.click(); }
+      else if (act === 'share') { const st = S?.kind === 'scent' && S.daily && S.phase === 'done' ? scentShare() : null; if (st) shareOut(st, b); }
+      else if (act === 'explore') { sheet.close(); document.getElementById('m-explore')?.click(); }
+    });
+    sheet.addEventListener('close', () => { clearInterval(sheetTimer); });
+  }
+  clearInterval(sheetTimer);
+  sheet.className = 'sheet ' + (cls || '');
+  sheet.innerHTML = `<div class="sheet-in"><button class="btn icon ghost sheet-x" data-sheet="close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>${html}</div>`;
+  if (!sheet.open) sheet.showModal();
+  const clock = sheet.querySelector('[data-clock]');
+  if (clock) sheetTimer = setInterval(() => { if (!sheet.open) return clearInterval(sheetTimer); clock.textContent = untilNext(); }, 1000);
+}
+export function openHelp() {
+  store.set('help', 1);
+  const drop = '<svg viewBox="0 0 24 24"><path d="M12 2.6c3.4 4.4 6.4 8.1 6.4 11.6a6.4 6.4 0 0 1-12.8 0c0-3.5 3-7.2 6.4-11.6z"/></svg>';
+  openSheet(`<h2>How to play</h2>
+    <p class="sheet-lede">Every day there is one famous perfume. Name the notes it is made from.</p>
+    <ol class="sheet-steps">
+      <li><b>Type a note</b><span>Anything you think is in it: bergamot, rose, vanilla, oud… A right one lights up on the globe where it grows.</span></li>
+      <li><b>Rarer notes score more</b><span>A classic like bergamot is worth ${RARE[0][2]}. A note few perfumes use is worth up to ${RARE[3][2]}.</span></li>
+      <li><b>Mind your drops</b><span>You have five <i class="sheet-drop">${drop}</i>. A wrong note costs one and unlocks a hint.</span></li>
+      <li><b>Come back tomorrow</b><span>Everyone gets the same perfume. A new one arrives at midnight UTC.</span></li>
+    </ol>
+    <button class="btn primary sheet-go" data-sheet="play" autofocus>Play today’s scent</button>
+    <p class="sheet-foot muted">Between dailies, <button class="linkish" data-sheet="explore">explore the atlas</button> of ${INGREDIENTS.length} ingredients and ${FRAGRANCES.length} perfumes.</p>`, 'help');
+}
+export function openStats() {
+  const s = dailyStats(), top = Math.max(1, ...s.dist.map((x) => x.n)), played = !!s.todays;
+  openSheet(`<h2>Your stats</h2>
+    <div class="sheet-nums">${[[s.played, 'Played'], [`${s.avg}%`, 'Notes found'], [s.perfect, 'Perfect'], [s.streak, 'Streak'], [s.best, 'Best streak']].map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div>
+    ${s.played ? `<div class="sheet-score"><span>Best score <b class="mono">${s.bestScore.toLocaleString('en')}</b></span><span>Average <b class="mono">${s.avgScore.toLocaleString('en')}</b></span>${s.todays ? `<span>Today <b class="mono">${s.todays.pts.toLocaleString('en')}</b></span>` : ''}</div>` : ''}
+    <h3>Notes found per day</h3>
+    <div class="sheet-dist">${s.dist.map((x, k) => `<div class="${k === s.mine ? 'me' : ''}"><span>${x.label}</span><i style="--w:${Math.max(x.n ? 0.08 : 0, x.n / top)}"><b>${x.n}</b></i></div>`).join('')}</div>
+    <div class="sheet-next"><div><span class="muted">Next scent in</span><b class="mono" data-clock>${untilNext()}</b></div>
+      ${played ? '<button class="btn primary" data-sheet="share" autofocus><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg><span>Share</span></button>' : '<button class="btn primary" data-sheet="play" autofocus>Play today’s scent</button>'}</div>
+    ${s.played ? '' : '<p class="sheet-foot muted">Your numbers start with your first daily scent. They are kept in this browser.</p>'}`, 'stats');
+}
+// back to today's scent from anywhere in the game
+export function showDaily() {
+  if (!A) return;
+  if (S?.kind === 'scent' && S.daily) return;
+  if (NET) leaveRoom();
+  clearInterval(timer);
+  scentOpen(true);
+}
+// on a phone the system share sheet, elsewhere the clipboard
+function shareOut(text, b, fail) {
+  if (navigator.share && matchMedia('(hover: none)').matches) { navigator.share({ text }).catch(() => {}); return; }
+  copyText(text, b, 'Copied', fail);
+}
+
 // ── panel + keys ─────────────────────────────────────────
 function onPanelClick(e) {
   const m = e.target.closest('.g-mode');
@@ -993,7 +1098,7 @@ function onPanelClick(e) {
   else if (act === 'scent-guess') scentGuess(gameEl.querySelector('[data-sc-in]')?.value || '');
   else if (act === 'scent-pick') scentGuess(b.dataset.label, b.dataset.id);
   else if (act === 'scent-giveup') { if (b.dataset.sure) scentGiveUp(); else { b.dataset.sure = '1'; b.textContent = 'Tap again to reveal every note'; } }
-  else if (act === 'scent-share') copyText(scentShare(), b, 'Copied', selectShare);
+  else if (act === 'scent-share') shareOut(scentShare(), b, selectShare);
   else if (act === 'scent-fact') { gameEl.querySelectorAll('.g-sc-card').forEach((x) => x.classList.toggle('on', x === b)); S.last = S.log.find((e) => e.hit && e.id === b.dataset.id); scentFact(gameEl.querySelector('[data-sc-fact]'), S.last); }
   else if (act === 'guess') submit();
   else if (act === 'next') advance();

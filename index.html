@@ -557,7 +557,6 @@ h2.title { margin: 0; font-family: var(--font-display); font-size: 31px; line-he
 .g-sc-score { display: flex; align-items: center; gap: 16px; }
 .g-sc-score .g-big { flex: none; font-family: var(--font-display); font-weight: 400; font-size: 64px; letter-spacing: -0.02em; }
 .g-sc-score .g-big b { font-weight: 400; }
-.w-txt b .badge { font-family: var(--font-sans); }
 .g-sc-score .g-big span { font-size: 28px; color: var(--muted-foreground); }
 .g-sc-score .title { margin: 0; font-size: 27px; }
 .g-sc-score .prose { margin: 2px 0 0; }
@@ -899,118 +898,14 @@ h2.title { margin: 0; font-family: var(--font-display); font-size: 31px; line-he
 .modes #play svg { color: var(--accent); transition: color .3s; }
 .modes #play[aria-selected="true"], .modes #play[aria-selected="true"] svg { color: var(--accent-fg); }
 .modes-pill { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 8px; background: var(--card); box-shadow: 0 1px 3px rgba(0,0,0,.12); transition: transform .5s var(--ease), background .35s, box-shadow .35s; }
-.modes[data-mode="play"] .modes-pill { transform: translateX(100%); background: var(--accent); box-shadow: 0 6px 18px -6px var(--accent); }
+.modes[data-mode="play"] .modes-pill { background: var(--accent); box-shadow: 0 4px 14px -6px var(--accent); }
+.modes[data-mode="explore"] .modes-pill { transform: translateX(100%); }
 .modes-live { position: absolute; top: 5px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 .modes-live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: inherit; animation: glive 1.8s var(--ease) infinite; }
 .modes[data-mode="play"] .modes-live { display: none; }
 .brand { cursor: pointer; }
 
-/* ── welcome: explore or play ── */
-.welcome { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; overflow-y: auto; padding: 24px 16px; background: color-mix(in srgb, var(--background) 62%, transparent); backdrop-filter: blur(10px) saturate(1.1); -webkit-backdrop-filter: blur(10px) saturate(1.1); animation: wfade .5s var(--ease) both; }
-.welcome[hidden] { display: none; }
-.welcome.out { animation: wout .45s var(--ease) both; pointer-events: none; }
-@keyframes wfade { from { opacity: 0; } }
-/* the accent words spread in like ink on paper */
-@keyframes wInk { from { opacity: 0; filter: blur(10px); letter-spacing: .12em; background-position: 100% 0; } to { background-position: 0 0; } }
-@keyframes wout { to { opacity: 0; transform: scale(1.02); } }
-.w-inner { width: min(860px, 100%); display: grid; gap: 14px; justify-items: center; text-align: center; }
-.w-inner > * { animation: gin .6s var(--ease) both; }
-.w-inner > :nth-child(2) { animation-delay: .06s; } .w-inner > :nth-child(3) { animation-delay: .12s; } .w-inner > :nth-child(4) { animation-delay: .2s; }
-.w-kicker { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
-.w-kicker i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
-.welcome:focus { outline: none; }
-.welcome h2 { margin: 2px 0 0; font-family: var(--font-display); font-size: clamp(38px, 6.4vw, 64px); line-height: 1; letter-spacing: -0.015em; font-weight: 400; }
-.welcome h2 em { display: inline-block; font-style: italic; padding-right: .08em; animation: wInk 1.6s var(--ease) .35s both; background-size: 220% 100% !important; background: linear-gradient(90deg, var(--accent), var(--gold)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.w-sub { margin: 0; max-width: 520px; color: var(--muted-foreground); font-size: 15px; }
-.w-cards { width: 100%; display: grid; grid-template-columns: 1fr 1.15fr; gap: 14px; margin-top: 10px; text-align: left; }
-.w-card { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 12px; padding: 14px; border-radius: 18px; border: 1px solid var(--border); background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 18px 40px -24px rgba(0,0,0,.25); cursor: pointer; transition: transform .35s var(--ease), box-shadow .35s var(--ease), border-color .25s; }
-.w-card:hover { transform: translateY(-3px); box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 28px 50px -24px rgba(0,0,0,.35); border-color: color-mix(in srgb, var(--foreground) 18%, var(--border)); }
-.w-play { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, var(--card)), var(--card) 60%); }
-.w-play:hover { border-color: var(--accent); box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 28px 50px -22px color-mix(in srgb, var(--accent) 55%, transparent); }
-.w-art { position: relative; height: 150px; border-radius: 12px; overflow: hidden; display: grid; place-items: center; background: radial-gradient(70% 90% at 50% 100%, color-mix(in srgb, var(--accent) 10%, var(--muted)), var(--muted)); }
-/* the Explore card's live globe: a real cobe sphere of every ingredient, fading in once drawn */
-/* a planet rising over the card's horizon */
-.w-globe { position: absolute; left: 50%; top: 26px; width: 270px; height: 270px; opacity: 0; transform: translate(-50%, 40px) scale(.92); transition: opacity 1s var(--ease), transform 1.6s var(--ease); }
-.w-globe.ready { opacity: 1; transform: translate(-50%, 0); }
-.w-globe canvas { width: 100% !important; height: 100% !important; display: block; }
-
-.w-map { width: 86%; height: auto; overflow: visible; }
-.w-arc { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: 220; stroke-dashoffset: 220; animation: warc 3.2s var(--ease) infinite; }
-@keyframes warc { 0% { stroke-dashoffset: 220; } 45%, 85% { stroke-dashoffset: 0; opacity: 1; } 100% { stroke-dashoffset: 0; opacity: 0; } }
-.w-pin1 circle { fill: var(--foreground); }
-.w-pin2 circle { fill: var(--accent); transform-origin: 170px 62px; animation: wpop 3.2s var(--ease) infinite; }
-.w-pin2 .w-ring { fill: none; stroke: var(--accent); stroke-width: 2; animation: wring 3.2s var(--ease) infinite; }
-.w-pin2 .w-ring.r2 { animation-delay: .25s; }
-@keyframes wpop { 0%, 40% { transform: scale(0); } 52% { transform: scale(1.3); } 60%, 100% { transform: scale(1); } }
-@keyframes wring { 0%, 44% { transform: scale(1); opacity: 0; } 46% { opacity: .9; } 80%, 100% { transform: scale(4.2); opacity: 0; } }
-.w-score { position: absolute; right: 14%; top: 18%; font-weight: 600; font-size: 14px; color: var(--accent); animation: wscore 3.2s var(--ease) infinite; }
-@keyframes wscore { 0%, 48% { opacity: 0; transform: translateY(8px); } 58%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-6px); } }
-/* the daily scent card: a bottle breathing out wisps while hidden notes flip over one by one */
-.w-scent { background: radial-gradient(60% 80% at 50% 95%, color-mix(in srgb, var(--accent) 16%, var(--muted)), var(--muted)); }
-.w-bottle { width: 104px; height: 104px; overflow: visible; animation: wbreathe 4.8s ease-in-out infinite; }
-.w-cap { fill: var(--gold); }
-.w-neck { fill: color-mix(in srgb, var(--gold) 70%, var(--foreground)); }
-.w-glass { fill: color-mix(in srgb, var(--card) 55%, transparent); stroke: color-mix(in srgb, var(--foreground) 22%, transparent); stroke-width: 1.5; }
-.w-liquid { fill: var(--accent); opacity: .78; transform-origin: 60px 100px; animation: wslosh 4.8s ease-in-out infinite; }
-.w-shine { fill: none; stroke: rgba(255, 255, 255, .7); stroke-width: 3; stroke-linecap: round; }
-@keyframes wbreathe { 50% { transform: translateY(-3px) rotate(-1.5deg); } }
-@keyframes wslosh { 50% { transform: scaleY(.94) skewY(-2deg); } }
-.w-wisp { position: absolute; left: calc(50% - 10px + var(--i) * 6px); top: 30px; width: 20px; height: 20px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 40%, transparent); filter: blur(6px); opacity: 0; animation: wwisp 3.6s ease-out infinite; animation-delay: calc(var(--i) * 1.2s); }
-@keyframes wwisp { 0% { opacity: 0; transform: translate(0, 0) scale(.4); } 25% { opacity: .9; } 100% { opacity: 0; transform: translate(calc((var(--i) - 1) * 26px), -46px) scale(2.2); } }
-.w-note { position: absolute; display: grid; place-items: center; height: 26px; padding: 0 11px; border-radius: 999px; font-size: 12px; font-weight: 500; perspective: 300px; animation: wfloat 4s ease-in-out infinite; animation-delay: calc(var(--i) * -1.3s); }
-.w-note b, .w-note em { grid-area: 1 / 1; display: grid; place-items: center; height: 26px; padding: 0 11px; border-radius: 999px; font-style: normal; backface-visibility: hidden; animation: wface 6s var(--ease) infinite; animation-delay: calc(var(--i) * .9s); }
-.w-note b { min-width: 36px; border: 1px dashed color-mix(in srgb, var(--foreground) 25%, transparent); background: var(--card); color: var(--muted-foreground); font: 500 11px var(--font-mono); }
-.w-note em { border: 1px solid color-mix(in srgb, var(--c) 50%, transparent); background: color-mix(in srgb, var(--c) 16%, var(--card)); color: var(--foreground); box-shadow: 0 6px 16px -8px var(--c); animation-name: wback; }
-@keyframes wface { 0%, 22% { transform: rotateY(0); } 32%, 82% { transform: rotateY(180deg); } 92%, 100% { transform: rotateY(360deg); } }
-@keyframes wback { 0%, 22% { transform: rotateY(-180deg); } 32%, 82% { transform: rotateY(0); } 92%, 100% { transform: rotateY(180deg); } }
-@keyframes wfloat { 50% { transform: translateY(-5px); } }
-.w-lives { position: absolute; right: 12px; bottom: 10px; display: flex; gap: 3px; }
-.w-lives i { width: 8px; height: 10px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; background: var(--accent); }
-.w-lives i.gone { animation: wgone 6s ease-in-out infinite; }
-@keyframes wgone { 0%, 55% { opacity: 1; transform: none; } 65% { opacity: .9; transform: translateY(-4px) scale(1.3); background: #c4513f; } 80%, 100% { opacity: .25; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .welcome h2 em, .w-shot, .w-bottle, .w-liquid, .w-wisp, .w-note, .w-note b, .w-note em, .w-lives i.gone { animation: none; } .w-note b { display: none; } }
-.w-world { background: radial-gradient(60% 90% at 50% 110%, color-mix(in srgb, var(--accent) 12%, var(--muted)), var(--muted)); }
-.w-shot { position: absolute; left: 50%; top: 50%; width: auto; height: 108%; aspect-ratio: 1; transform: translate(-50%, -44%) scale(.94); opacity: 0; transition: opacity .9s var(--ease), transform 1.4s var(--ease); filter: drop-shadow(0 10px 14px rgba(60, 40, 20, .2)); pointer-events: none; }
-.w-scent.real .w-shot { opacity: 1; transform: translate(-50%, -44%); animation: wshot 4.8s ease-in-out 1.4s infinite; }
-@keyframes wshot { 50% { transform: translate(-50%, -46.5%) rotate(-1deg); } }
-.w-scent.real .w-bottle { opacity: 0; }
-.w-bottle { transition: opacity .5s; }
-.w-scent.real { background: radial-gradient(55% 90% at 50% 60%, color-mix(in srgb, var(--sig, var(--accent)) 22%, var(--muted)), var(--muted)); }
-.w-today { position: absolute; left: 10px; top: 8px; z-index: 2; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; padding: 3px 8px; border-radius: 999px; background: color-mix(in srgb, var(--card) 72%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font-size: 10.5px; letter-spacing: .04em; color: var(--muted-foreground); white-space: nowrap; }
-.w-today:empty { display: none; }
-.w-today b { color: var(--foreground); font-weight: 500; }
-.w-note, .w-lives, .w-wisp { z-index: 1; }
-.w-txt { display: grid; gap: 4px; }
-.w-txt b { font-family: var(--font-display); font-size: 26px; font-weight: 400; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
-.w-txt > span { color: var(--muted-foreground); font-size: 13.5px; line-height: 1.5; }
-.w-modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; align-self: end; }
-.w-mode { display: grid; gap: 1px; padding: 8px 10px; text-align: left; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); cursor: pointer; transition: border-color .2s, background .2s, transform .15s var(--ease); }
-.w-mode:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
-.w-mode:active { transform: scale(.97); }
-.w-mode b { font-size: 13px; font-weight: 600; }
-.w-mode span { font-size: 11.5px; color: var(--muted-foreground); line-height: 1.3; }
-.w-go { height: 40px; font-size: 14px; border-radius: 10px; justify-self: stretch; align-self: end; }
-.w-go svg { width: 15px; height: 15px; transition: transform .25s var(--ease); }
-.w-card:hover .w-go svg { transform: translateX(3px); }
-.w-go.primary { position: relative; overflow: hidden; background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-.w-go.primary::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgba(255,255,255,.35) 50%, transparent 70%); transform: translateX(-100%); animation: gshine 3.2s var(--ease) 1s infinite; }
-@media (max-width: 720px) {
-  .w-cards { grid-template-columns: 1fr; }
-  .w-art { height: 116px; }
-  .w-globe { width: 230px; height: 230px; top: 18px; }
-  .welcome { place-items: start center; }
-  .w-play { order: -1; }
-}
-
 /* ── multiplayer ── */
-.w-daily, .w-friends { grid-column: 1 / -1; grid-template-columns: 22px auto 1fr auto; align-items: center; column-gap: 8px; }
-.w-daily svg, .w-friends svg { width: 18px; height: 18px; color: var(--accent); }
-.w-daily span, .w-friends span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.w-daily { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: color-mix(in srgb, var(--accent) 7%, var(--card)); }
-.w-dots { display: flex; }
-.w-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--card); margin-left: -4px; background: #c4513f; animation: gbob 1.6s var(--ease) infinite; }
-.w-dots i:nth-child(2) { background: #0090ff; animation-delay: .15s; }
-.w-dots i:nth-child(3) { background: #4f8f63; animation-delay: .3s; }
 .g-who { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 10px 16px 0; padding: 4px; border-radius: 12px; background: var(--muted); }
 .g-who button { height: 34px; border: 0; border-radius: 9px; background: transparent; color: var(--muted-foreground); font: 500 12.5px var(--font-sans); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap; transition: background .2s, color .2s, box-shadow .2s; }
 .g-who button svg { width: 15px; height: 15px; flex: none; }
@@ -1299,9 +1194,6 @@ button.mile:focus-visible { outline: 2px solid var(--r); outline-offset: 2px; }
 .g-sc-next b { font-size: 14px; font-weight: 600; color: var(--foreground); }
 .g-sc-next i { position: absolute; left: 12px; right: 12px; bottom: 7px; height: 3px; border-radius: 3px; background: var(--muted); }
 .g-sc-next i::after { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--p); border-radius: inherit; background: linear-gradient(90deg, var(--gold), var(--accent)); }
-.w-card.waiting .w-go { pointer-events: none; opacity: .75; }
-.w-card.waiting .w-go svg { animation: w-wait 1s linear infinite; }
-@keyframes w-wait { to { transform: rotate(360deg); } }
 .col-sync { margin: -2px 2px 0; font-size: 12px; color: var(--muted-foreground); display: flex; align-items: center; gap: 7px; }
 .col-sync::before { content: ""; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--muted-foreground); opacity: .5; }
 .col-sync[data-st="synced"]::before { background: #4f8f63; opacity: 1; box-shadow: 0 0 6px #4f8f63; }
@@ -1310,6 +1202,82 @@ button.mile:focus-visible { outline: 2px solid var(--r); outline-offset: 2px; }
 @keyframes toast-out { to { opacity: 0; transform: translateX(-24px); } }
 @media (max-width: 640px) { .toasts { left: 16px; right: 16px; width: auto; top: 10px; bottom: auto; } .toast { grid-template-columns: 36px 1fr auto; } .toast .toast-x { display: none; } .toast-ic { width: 36px; height: 36px; } }
 @media (prefers-reduced-motion: reduce) { .toast, .toast.out { animation: none; } }
+/* ── header: compact search, icon buttons, icon-only theme switch ── */
+.search-trigger { width: auto; min-width: 150px; }
+.top-ic { width: 34px; height: 34px; color: var(--muted-foreground); }
+.top-ic:hover { color: var(--foreground); }
+.top-ic svg { width: 18px; height: 18px; }
+.theme-seg button span { display: none; }
+.theme-seg button { padding: 0 7px; }
+@media (max-width: 900px) { .search-trigger { min-width: 0; width: 34px; padding: 0; justify-content: center; } .search-trigger span, .search-trigger kbd { display: none; } }
+@media (max-width: 520px) { .top-ic { width: 30px; } .topbar { gap: 6px; } }
+
+/* ── sheets: how to play and stats ── */
+.sheet { width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 0; border: 1px solid var(--border); border-radius: 18px; background: var(--card); color: var(--foreground); box-shadow: 0 30px 80px -30px rgba(0,0,0,.45); overflow: auto; }
+.sheet::backdrop { background: rgba(15, 12, 10, .42); }
+.sheet[open] { animation: sheetIn .35s var(--ease) both; }
+.sheet[open]::backdrop { animation: wfade .3s ease both; }
+@keyframes sheetIn { from { opacity: 0; transform: translateY(14px) scale(.98); } }
+@keyframes wfade { from { opacity: 0; } }
+.sheet-in { position: relative; display: grid; gap: 14px; padding: 26px 24px 22px; }
+.sheet-x { position: absolute; top: 12px; right: 12px; }
+.sheet h2 { margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.015em; }
+.sheet h3 { margin: 6px 0 -4px; font-size: 12px; font-weight: 600; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: .06em; }
+.sheet-lede { margin: -6px 0 0; color: var(--muted-foreground); font-size: 14.5px; }
+.sheet-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; counter-reset: st; }
+.sheet-steps li { display: grid; grid-template-columns: 28px 1fr; column-gap: 12px; counter-increment: st; }
+.sheet-steps li::before { content: counter(st); grid-row: span 2; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 600; background: var(--accent-soft); color: var(--accent); }
+.sheet-steps b { font-size: 14px; font-weight: 600; }
+.sheet-steps span { color: var(--muted-foreground); font-size: 13.5px; line-height: 1.45; }
+.sheet-drop svg { width: 12px; height: 12px; fill: var(--accent); vertical-align: -1px; }
+.sheet-go { height: 42px; font-size: 14.5px; border-radius: 11px; background: var(--accent); border-color: var(--accent); color: var(--accent-fg); margin-top: 4px; }
+.sheet-foot { margin: 0; font-size: 13px; text-align: center; }
+.linkish { padding: 0; border: 0; background: none; color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; font: inherit; }
+.sheet-nums { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; text-align: center; }
+.sheet-nums div { display: grid; gap: 2px; }
+.sheet-nums b { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.sheet-nums span { font-size: 11.5px; color: var(--muted-foreground); line-height: 1.2; }
+.sheet-dist { display: grid; gap: 6px; }
+.sheet-dist div { display: grid; grid-template-columns: 96px 1fr; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted-foreground); }
+.sheet-dist i { font-style: normal; display: flex; justify-content: flex-end; width: calc(var(--w) * 100%); min-width: 22px; height: 22px; border-radius: 6px; background: var(--muted); transition: width .6s var(--ease); }
+.sheet-dist b { padding: 0 7px; font-size: 12px; font-weight: 600; line-height: 22px; color: var(--foreground); }
+.sheet-dist .me i { background: var(--accent); }
+.sheet-dist .me b { color: var(--accent-fg); }
+.sheet-dist .me span { color: var(--foreground); font-weight: 600; }
+.sheet-next { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
+.sheet-next > div { display: grid; gap: 1px; }
+.sheet-next span { font-size: 12.5px; }
+.sheet-next b { font-size: 22px; font-weight: 500; letter-spacing: .02em; }
+.sheet-next .btn { height: 40px; padding: 0 18px; border-radius: 11px; background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-size: 14px; }
+@media (max-width: 520px) {
+  .sheet { width: 100vw; max-width: 100vw; margin: auto 0 0; border-radius: 20px 20px 0 0; border-bottom: 0; }
+  .sheet[open] { animation-name: sheetUp; }
+  @keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } }
+  .sheet-in { padding: 22px 18px calc(18px + env(safe-area-inset-bottom, 0px)); }
+  .sheet-nums b { font-size: 22px; }
+}
+@media (prefers-reduced-motion: reduce) { .sheet[open], .sheet[open]::backdrop { animation: none; } }
+/* ── rarity points ── */
+.g-pts { display: inline-block; margin-right: 7px; padding: 1px 7px; border-radius: 999px; font: 600 12px/18px var(--font-mono); background: var(--muted); color: var(--foreground); vertical-align: 1px; }
+.g-pts.r-uncommon { background: color-mix(in srgb, #3b82f6 16%, var(--card)); color: #2563eb; }
+.g-pts.r-rare { background: color-mix(in srgb, #8b5cf6 18%, var(--card)); color: #7c3aed; }
+:root[data-theme="dark"] .g-pts.r-uncommon { color: #93b4f8; } :root[data-theme="dark"] .g-pts.r-rare { color: #b9a0f7; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .g-pts.r-uncommon { color: #93b4f8; } :root:not([data-theme="light"]) .g-pts.r-rare { color: #b9a0f7; } }
+.g-chip-pts { font-style: normal; font: 500 10.5px var(--font-mono); opacity: .6; margin-left: 2px; }
+.g-sc-pts { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 12.5px; }
+.g-sc-pts b { font-size: 20px; font-weight: 600; color: var(--foreground); }
+.sheet-score { display: flex; justify-content: center; gap: 18px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted-foreground); margin-top: -4px; }
+.sheet-score b { color: var(--foreground); font-weight: 600; margin-left: 3px; }
+/* ── phone header: everything on one row ── */
+@media (max-width: 560px) {
+  .modes button svg { display: none; }
+  .modes button { padding: 0 12px; }
+  .topbar:has(.modes[data-mode="play"]) .search-trigger { display: none; }
+  .theme-seg [data-theme-v="auto"] { display: none; }
+  .game-hud > .mono:first-child { display: none; }
+  .game-hud { flex-wrap: nowrap; white-space: nowrap; padding: 6px 12px; }
+}
+@media (max-width: 350px) { .theme-seg { display: none; } .modes button { padding: 0 10px; } }
 </style>
 
 </head>
@@ -1319,18 +1287,19 @@ button.mile:focus-visible { outline: 2px solid var(--r); outline-offset: 2px; }
     <div class="brand">
       <svg class="logo" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9.5 2.5h5v3h-5z" fill="currentColor"/><path d="M10.5 5.5h3v2h-3z" stroke="currentColor" stroke-width="1.3"/><rect x="4.5" y="7.5" width="15" height="14" rx="4" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="14.5" r="3.6" fill="var(--accent)"/><path d="M12 10.9c-1.3 1-1.9 2.2-1.9 3.6s.6 2.6 1.9 3.6M8.4 14.5h7.2" stroke="var(--background)" stroke-width="1"/><circle cx="18" cy="3" r="1" fill="var(--accent)"/><circle cx="20.5" cy="4.6" r=".75" fill="var(--accent)" opacity=".7"/><circle cx="20.6" cy="1.6" r=".6" fill="var(--accent)" opacity=".5"/></svg>
       <h1>Fraguessr</h1>
-      <span class="mono muted" id="stats"></span>
     </div>
-    <nav class="modes" data-mode="explore" role="tablist" aria-label="Mode">
+    <nav class="modes" data-mode="play" role="tablist" aria-label="Mode">
       <i class="modes-pill" aria-hidden="true"></i>
-      <button role="tab" id="m-explore" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg><span>Explore</span></button>
-      <button role="tab" id="play" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-6.3 7-12a7 7 0 1 0-14 0c0 5.7 7 12 7 12z"/><path d="M10 7.5v5l4-2.5z" fill="currentColor"/></svg><span>Play</span><b class="modes-live" aria-hidden="true"></b></button>
+      <button role="tab" id="play" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Daily</span><b class="modes-live" aria-hidden="true"></b></button>
+      <button role="tab" id="m-explore" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg><span>Explore</span></button>
     </nav>
     <div class="spacer"></div>
     <button class="search-trigger" id="open-search" aria-label="Search ingredients and fragrances">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <span>Search ingredients or perfumes…</span><kbd>⌘K</kbd>
+      <span>Search</span><kbd>⌘K</kbd>
     </button>
+    <button class="btn icon ghost top-ic" id="open-help" aria-label="How to play" title="How to play"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.8 1c0 1.7-2.4 2.2-2.4 3.6"/><circle cx="12" cy="17.2" r=".6" fill="currentColor"/></svg></button>
+    <button class="btn icon ghost top-ic" id="open-stats" aria-label="Your stats" title="Your stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V12M12 20V5M19 20v-5"/></svg></button>
     <div class="theme-seg" id="theme" role="radiogroup" aria-label="Colour theme" data-v="auto">
       <i class="theme-pill" aria-hidden="true"></i>
       <button role="radio" data-theme-v="light" aria-checked="false" aria-label="Light mode" title="Light"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg><span>Light</span></button>
@@ -1383,41 +1352,6 @@ button.mile:focus-visible { outline: 2px solid var(--r); outline-offset: 2px; }
   </main>
 </div>
 
-<div class="welcome" id="welcome" role="dialog" aria-modal="true" aria-labelledby="w-title" hidden>
-  <div class="w-inner">
-    <span class="mono w-kicker"><i></i>Fraguessr</span>
-    <h2 id="w-title">Where does your perfume <em>come from?</em></h2>
-    <p class="w-sub" id="w-sub">Perfume ingredients from around the world, traced into the fragrances that made them famous.</p>
-    <div class="w-cards">
-      <div class="w-card w-explore" data-go="explore">
-        <div class="w-art w-world" aria-hidden="true"><div class="w-globe" id="w-globe"></div></div>
-        <div class="w-txt"><b>Explore</b><span>Spin the globe, zoom into regions and open any ingredient or perfume in 3D.</span></div>
-        <button class="btn w-go" data-go="explore">Open the atlas<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
-      </div>
-      <div class="w-card w-play" data-go="play">
-        <div class="w-art w-scent" aria-hidden="true">
-          <svg class="w-bottle" viewBox="0 0 120 120"><rect class="w-cap" x="49" y="10" width="22" height="15" rx="3.5"/><rect class="w-neck" x="54" y="24" width="12" height="9" rx="1.5"/><rect class="w-glass" x="28" y="32" width="64" height="74" rx="18"/><rect class="w-liquid" x="33" y="52" width="54" height="49" rx="14"/><path class="w-shine" d="M39 44c-4 14-4 34 0 50"/></svg>
-          <i class="w-wisp" style="--i:0"></i><i class="w-wisp" style="--i:1"></i><i class="w-wisp" style="--i:2"></i>
-          <span class="w-note" style="--i:0;--c:#e2b33c;left:9%;top:22%"><b>?</b><em>Bergamot</em></span>
-          <span class="w-note" style="--i:1;--c:#d9577a;right:8%;top:30%"><b>?</b><em>Rose</em></span>
-          <span class="w-note" style="--i:2;--c:#a5714a;left:12%;bottom:16%"><b>?</b><em>Vanilla</em></span>
-          <span class="w-lives"><i></i><i></i><i></i><i></i><i class="gone"></i></span>
-          <span class="w-today mono" id="w-today"></span>
-        </div>
-        <div class="w-txt"><b>Daily scent <span class="badge accent">New every day</span></b><span>Meet today’s famous fragrance, then name its notes with five chances. Every note you find reveals a fun fact.</span></div>
-        <button class="btn w-go primary" data-go="play">Play today’s scent<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg></button>
-      </div>
-    </div>
-  </div>
-</div>
-<script>
-// show the welcome while the app's code is still arriving; a card picked before it is ready is kept for it
-(() => {
-  const w = document.getElementById('welcome'); if (location.hash.length > 1) return;
-  w.hidden = false; document.querySelector('.app').inert = true;
-  w.addEventListener('click', (e) => { const t = e.target.closest('[data-go]'); if (!t || w.dataset.ready) return; w.dataset.pending = t.dataset.go; t.closest('.w-card')?.classList.add('waiting'); });
-})();
-</script>
 <div class="cmdk-backdrop" id="cmdk" inert>
   <div class="cmdk" role="dialog" aria-label="Search">
     <div class="cmdk-input">
