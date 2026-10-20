@@ -1,0 +1,35 @@
+{
+  "rules": {
+    "daily": {
+      "$date": {
+        ".read": "$date.matches(/^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$/)",
+        "n": {
+          ".write": "auth != null && !root.child('subs/' + $date + '/' + auth.uid).exists() && newData.parent().parent().parent().child('subs/' + $date + '/' + auth.uid).val() === true",
+          ".validate": "newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
+        },
+        "notes": {
+          "$id": {
+            ".write": "auth != null && !root.child('subs/' + $date + '/' + auth.uid).exists() && newData.parent().parent().parent().parent().child('subs/' + $date + '/' + auth.uid).val() === true",
+            ".validate": "$id.matches(/^[a-z0-9_]{1,40}$/) && newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
+          }
+        },
+        "score": {
+          "$k": {
+            ".write": "auth != null && !root.child('subs/' + $date + '/' + auth.uid).exists() && newData.parent().parent().parent().parent().child('subs/' + $date + '/' + auth.uid).val() === true",
+            ".validate": "$k.matches(/^[0-9]{1,2}$/) && newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+    "subs": {
+      "$date": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid && !data.exists()",
+          ".validate": "$date.matches(/^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$/) && newData.val() === true"
+        }
+      }
+    }
+  }
+}
