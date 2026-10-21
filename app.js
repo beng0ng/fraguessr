@@ -1641,10 +1641,9 @@ initGlobe();
 // a bare visit opens on the opening page, with the atlas waiting behind it, zoomed out, until a door is picked
 const intro = initIntro({
   daily: (gamePromise ||= import('./game.js')).then((m) => { const d = m.dailyInfo(); return { ...d, color: fragHex(FRAG[d.id]) }; }),
-  counts: { ingredients: INGREDIENTS.length, perfumes: FRAGRANCES.length, countries: new Set(INGREDIENTS.map((i) => i.country)).size },
-  foot: myNotes.size ? `${myNotes.size} notes and ${seenFacts.size.toLocaleString('en-US')} facts in your collection` : '',
+  notes: INGREDIENTS.map((i) => ({ id: i.id, name: i.name, where: i.country, c: famHex(i.family) })),
   colors: Object.keys(FAMILIES).map(famHex), thumbs: THUMBS,
-  onPlay: () => { view.tScale = 1; startPlay(); }, onExplore: () => { markMode('explore'); view.tScale = 1; },
+  onPlay: () => { view.tScale = 1; startPlay(); },
 });
 if (intro) { markMode('explore'); view.scale = view.tScale = 0.62; }
 else if (location.hash.length > 1 && !location.hash.startsWith('#play')) { markMode('explore'); fromHash(); } else startPlay();

@@ -593,7 +593,7 @@ export const scentPoolIds = () => scentPool().map((f) => f.id); // for the build
 export function dailyInfo() {
   const d = today(), f = scentOf(d), st = store.get(`scent:${d}`), streak = store.get('scent:streak');
   const done = st?.id === f.id && !!st.over, started = st?.id === f.id && !!st.log.length, got = started ? st.log.filter((e) => e.hit).length : 0;
-  return { id: f.id, name: f.name, house: f.house, label: dailyName(d), total: scentSize(f), got, done, started,
+  return { id: f.id, name: f.name, house: f.house, label: dailyName(d), total: scentSize(f), notes: [...f.ingredients], got, done, started,
     streak: streak && (streak.last === d || streak.last === prevDay(d)) ? streak.n : 0 };
 }
 function scentPool() {
