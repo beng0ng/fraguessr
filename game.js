@@ -596,6 +596,30 @@ export function dailyInfo() {
   return { id: f.id, name: f.name, house: f.house, label: dailyName(d), total: scentSize(f), notes: [...f.ingredients], got, done, started,
     streak: streak && (streak.last === d || streak.last === prevDay(d)) ? streak.n : 0 };
 }
+// practice games also deal these (added later); they stay out of SCENT_POOL so the daily order never changes
+const SCENT_MORE = [
+  'chanel-bleu-de-chanel-parfum', 'chanel-sycomore', 'chanel-coromandel', 'chanel-bois-des-iles', 'chanel-allure-homme-edition-blanche', 'dior-addict', 'dior-oud-ispahan', 'dior-dior-homme-parfum',
+  'dior-miss-dior-eau-de-parfum', 'dior-dior-homme-sport', 'yves-saint-laurent-l-homme', 'yves-saint-laurent-rive-gauche', 'yves-saint-laurent-tuxedo', 'yves-saint-laurent-libre-intense',
+  'guerlain-spiritueuse-double-vanille', 'guerlain-angelique-noire', 'guerlain-insolence', 'tom-ford-fucking-fabulous', 'tom-ford-cafe-rose', 'tom-ford-costa-azzurra', 'tom-ford-tobacco-oud',
+  'tom-ford-beau-de-jour', 'creed-viking', 'creed-aventus-for-her', 'creed-himalaya', 'maison-francis-kurkdjian-a-la-rose', 'maison-francis-kurkdjian-724',
+  'maison-francis-kurkdjian-gentle-fluidity-gold', 'hermes-kelly-caleche', 'hermes-bel-ami', 'giorgio-armani-stronger-with-you-intensely', 'giorgio-armani-armani-code-profumo', 'rabanne-pour-homme',
+  'rabanne-black-xs', 'rabanne-invictus-victory', 'versace-eros-flame', 'versace-man-eau-fraiche', 'versace-yellow-diamond', 'dolce-gabbana-dolce', 'dolce-gabbana-k-by-dolce-gabbana',
+  'dolce-gabbana-light-blue-eau-intense', 'givenchy-ange-ou-demon', 'givenchy-amarige', 'givenchy-irresistible', 'burberry-brit-for-her', 'burberry-mr-burberry', 'lancome-hypnose',
+  'lancome-magie-noire', 'gucci-memoire-d-une-odeur', 'gucci-envy', 'prada-prada-amber', 'prada-luna-rossa-black', 'calvin-klein-eternity-for-men', 'calvin-klein-ck-be',
+  'bvlgari-eau-parfumee-au-the-vert', 'bvlgari-omnia-amethyste', 'narciso-rodriguez-narciso', 'narciso-rodriguez-for-him-bleu-noir', 'azzaro-chrome', 'viktor-rolf-bonbon', 'ralph-lauren-polo-blue',
+  'ralph-lauren-polo-red', 'le-labo-lys-41', 'le-labo-patchouli-24', 'le-labo-vetiver-46', 'le-labo-ylang-49', 'jo-malone-london-pomegranate-noir', 'jo-malone-london-nectarine-blossom-honey',
+  'jo-malone-london-orange-blossom', 'diptyque-l-ombre-dans-l-eau', 'diptyque-eau-duelle', 'parfums-de-marly-percival', 'maison-margiela-replica-bubble-bath',
+  'maison-margiela-replica-when-the-rain-stops', 'montale-black-aoud', 'mancera-red-tobacco', 'louis-vuitton-ombre-nomade', 'bdk-parfums-rouge-smoking', 'etat-libre-d-orange-fat-electrician',
+  'etat-libre-d-orange-you-or-someone-like-you', 'tiziana-terenzi-kirke', 'roja-parfums-elysium-pour-homme', 'maison-crivelli-hibiscus-mahajad', 'vilhelm-parfumerie-mango-skin',
+  'histoires-de-parfums-1740-marquis-de-sade', 'nasomatto-black-afgano', 'orto-parisi-megamare', 'maison-louis-marie-no-04-bois-de-balincourt', 'clive-christian-x-for-men',
+  'penhaligon-s-the-tragedy-of-lord-george', 'xerjoff-accento', 'lacoste-l-12-12-blanc', 'lacoste-lacoste-pour-femme', 'miu-miu-miu-miu', 'coach-coach-eau-de-parfum', 'coach-coach-for-men',
+  'michael-kors-michael-kors', 'tiffany-co-tiffany-co-eau-de-parfum', 'abercrombie-fitch-fierce', 'bath-body-works-japanese-cherry-blossom', 'billie-eilish-eilish', 'stella-mccartney-stella',
+  'phlur-missing-person', 'salvatore-ferragamo-uomo', 'paris-hilton-paris-hilton', 'jennifer-lopez-glow', 'beyonce-heat', 'taylor-swift-wonderstruck', 'elizabeth-taylor-white-diamonds',
+  'clinique-aromatics-elixir', 'avon-far-away', 'cartier-pasha-de-cartier', 'cartier-must-de-cartier', 'van-cleef-arpels-first', 'ariana-grande-r-e-m', 'sabrina-carpenter-sweet-tooth',
+  'hollister-wave', 'mercedes-benz-mercedes-benz-man', 'ferrari-scuderia-ferrari-black', 'jimmy-choo-jimmy-choo-man'
+];
+let practiceOrder;
+const practicePool = () => (practiceOrder ||= [...scentPool(), ...SCENT_MORE.map((id) => FRAGRANCES.find((f) => f.id === id)).filter((f) => f && scentSize(f) >= SCENT_MIN && scentSize(f) <= SCENT_MAX)]);
 function scentPool() {
   if (scentOrder) return scentOrder;
   const pool = SCENT_POOL.map((id) => FRAGRANCES.find((f) => f.id === id)).filter((f) => f && scentSize(f) >= SCENT_MIN && scentSize(f) <= SCENT_MAX), r = rng(hash('fraguessr:scent'));
@@ -648,7 +672,7 @@ function scentResolve(raw, id) {
 
 function scentOpen(daily, fid) {
   clearInterval(timer); clearPins(); vignette?.stop(); vignette = null; fxItems = [];
-  const d = today(), pool = scentPool();
+  const d = today(), pool = practicePool();
   const f = daily ? scentOf(d) : FRAGRANCES.find((x) => x.id === fid) || (() => { const others = pool.filter((x) => x !== scentOf(d) && x.id !== S?.f?.id); return others[Math.floor(Math.random() * others.length)]; })();
   S = { kind: 'scent', phase: 'scent', daily, date: d, f, notes: scentNotes(f), found: new Set(), tried: [], hints: [], level: {}, target: null, lives: SCENT_LIVES, log: [], last: null, intro: true };
   const saved = daily && store.get(`scent:${d}`);

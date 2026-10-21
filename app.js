@@ -841,9 +841,10 @@ function observeThumbs() { listEl.querySelectorAll('[data-thumb]').forEach((el) 
 // build tooling: ?prerender renders every list thumbnail for the current theme so a script can save them as files
 if (new URLSearchParams(location.search).has('prerender')) {
   const keys = new URLSearchParams(location.search).get('prerender') || '';
-  window.prerenderThumbs = () => getModels().then((m) => Promise.all([
+  // `only` (a list of ids) limits the run to those, for adding new entries without redoing the rest
+  window.prerenderThumbs = (only) => getModels().then((m) => Promise.all([
     ...(keys.includes('i') ? INGREDIENTS.map((i) => m.thumbnail(`i:${i.id}`, m.thumbBuilders.ingredient(i))) : []),
-    ...(keys.includes('f') ? FRAGRANCES.map((f) => m.thumbnail(`f:${f.id}:${isDark() ? 'd' : 'l'}`, m.thumbBuilders.fragrance(f, liquidFor(f), fragHex(f)), sweepFor(fragHex(f)))) : []),
+    ...(keys.includes('f') ? FRAGRANCES.filter((f) => !only || only.includes(f.id)).map((f) => m.thumbnail(`f:${f.id}:${isDark() ? 'd' : 'l'}`, m.thumbBuilders.fragrance(f, liquidFor(f), fragHex(f)), sweepFor(fragHex(f)))) : []),
     // the daily bottles, larger and on a clear background so they sit on either theme
     ...(keys.includes('h') ? [import('./game.js').then((g) => Promise.all(g.scentPoolIds().map((id) => m.thumbnail(`h:${id}`, m.thumbBuilders.fragrance(FRAG[id], liquidFor(FRAG[id]), fragHex(FRAG[id])), null, { size: 480 }))))] : []),
   ]).then(() => m.renderedThumbs));
@@ -851,7 +852,8 @@ if (new URLSearchParams(location.search).has('prerender')) {
   window.prerenderStills = async (kind, from = 0, to = 1e9) => {
     const st = await getStage(), box = document.createElement('div'), out = [];
     box.style.cssText = 'position:fixed;left:0;top:0;width:864px;height:600px;z-index:99'; document.body.append(box); st.mount(box);
-    for (const x of (kind === 'i' ? INGREDIENTS : FRAGRANCES).slice(from, to)) {
+    const all = kind === 'i' ? INGREDIENTS : FRAGRANCES;
+    for (const x of Array.isArray(from) ? all.filter((y) => from.includes(y.id)) : all.slice(from, to)) {
       await showModel(st, kind === 'i' ? 'ing' : 'frag', kind === 'i' ? { ing: x } : { f: x, liquid: liquidFor(x) });
       out.push([`s:${kind}-${x.id}:${isDark() ? 'd' : 'l'}`, st.snapshot(kind === 'i' ? 'image/png' : 'image/jpeg', 0.95)]);
     }
