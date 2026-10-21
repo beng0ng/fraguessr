@@ -16,6 +16,7 @@ import { INGREDIENTS, FRAGRANCES, FAMILIES, HOUSES, noteId } from './data.js';
 import { createVignette } from './fx.js';
 import { createWorldLayer } from './world.js';
 import { createSky } from './sky.js';
+import { createFlybys } from './flyby.js';
 import { FACTS, LEGACY_TIER } from './facts.js';
 import { RARITY, RARITIES } from './rarity.js';
 import { letters, cascade, countUp, replay, burst } from './motion.js';
@@ -1601,11 +1602,20 @@ function shadeList() {
 const world = createWorldLayer($('#world'), { project, view, getSize: () => ({ W, H }), isDark, fit: () => fit, getDpr: renderDpr });
 const sky = createSky($('#sky'), { view, getSize: () => ({ W, H }), isDark, getDpr: renderDpr });
 world.resize(); sky.resize(); resizeDots();
+// ── now and then something passes through the sky; catching it opens a challenge (flyby.js, challenge.js) ──
+const flybys = createFlybys({
+  stage, isDark, reduce: reduceMotion,
+  allowed: () => !play.active && !root.classList.contains('intro-on') && stageSeen && !document.querySelector('dialog[open]') && !cmdk.classList.contains('open'),
+  onCatch: (item) => import('./challenge.js').then((m) => m.openChallenge(item, {
+    facts: { has: (id, r) => seenFacts.has(factKey(id, r)), discover, earn, mount: mountFact },
+    thumb: loadThumb,
+  })),
+});
 
 // ── Fraguessr game ─────────────────────────────────────
 let gamePromise = null;
 function startPlay(mode) {
-  stopTour(); if (sel.ing || sel.frag) clearSelection();
+  stopTour(); flybys.clear(); if (sel.ing || sel.frag) clearSelection();
   closeCmdk();
   gamePromise ||= import('./game.js');
   gamePromise.then((m) => m.openGame({

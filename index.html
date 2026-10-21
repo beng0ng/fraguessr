@@ -26,7 +26,7 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/cobe@2.0.1/dist/index.esm.js" as="fetch" crossorigin>
 <!-- every module the daily page needs, fetched in parallel instead of one import at a time -->
-<link rel="modulepreload" href="app.js"><link rel="modulepreload" href="data.js"><link rel="modulepreload" href="facts.js"><link rel="modulepreload" href="world.js"><link rel="modulepreload" href="sky.js"><link rel="modulepreload" href="fx.js"><link rel="modulepreload" href="rarity.js"><link rel="modulepreload" href="motion.js"><link rel="modulepreload" href="intro.js"><link rel="modulepreload" href="game.js"><link rel="modulepreload" href="stats.js"><link rel="modulepreload" href="borders.js">
+<link rel="modulepreload" href="app.js"><link rel="modulepreload" href="data.js"><link rel="modulepreload" href="facts.js"><link rel="modulepreload" href="world.js"><link rel="modulepreload" href="sky.js"><link rel="modulepreload" href="flyby.js"><link rel="modulepreload" href="fx.js"><link rel="modulepreload" href="rarity.js"><link rel="modulepreload" href="motion.js"><link rel="modulepreload" href="intro.js"><link rel="modulepreload" href="game.js"><link rel="modulepreload" href="stats.js"><link rel="modulepreload" href="borders.js">
 <meta name="apple-mobile-web-app-title" content="Fraguessr">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Fraguessr","url":"https://fraguessr.com/","description":"A daily perfume guessing game: name the notes in today's fragrance, then pin where they grow on a 3D globe.","applicationCategory":"GameApplication","operatingSystem":"Any","browserRequirements":"Requires a modern web browser","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
 <title>Fraguessr: the daily perfume guessing game</title>
@@ -1281,6 +1281,102 @@ button.mile:focus-visible { outline: 2px solid var(--r); outline-offset: 2px; }
   .sheet-nums b { font-size: 22px; }
 }
 @media (prefers-reduced-motion: reduce) { .sheet[open], .sheet[open]::backdrop { animation: none; } }
+/* things passing by in the sky (flyby.js), and the challenge catching one opens (challenge.js) */
+.flybys { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.flyby { position: absolute; left: 0; top: 0; display: block; padding: 0; border: 0; background: none; cursor: pointer; pointer-events: auto; will-change: transform; -webkit-tap-highlight-color: transparent; }
+.flyby::before { content: ""; position: absolute; inset: -12px; }
+.fb-art { display: block; width: 100%; height: 100%; transition: transform .3s var(--ease); }
+.fb-art svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.flyby[data-sky="night"] .fb-art { filter: drop-shadow(0 0 7px rgba(200, 225, 255, .5)); }
+.flyby[data-sky="day"] .fb-art { filter: drop-shadow(0 5px 6px rgba(70, 55, 40, .2)); }
+.flyby.fb-gold .fb-art { filter: drop-shadow(0 0 10px rgba(255, 200, 80, .85)); }
+.flyby:hover .fb-art, .flyby:focus-visible .fb-art { transform: scale(1.15); }
+.flyby:focus-visible { outline: 2px solid var(--accent); outline-offset: 8px; border-radius: 14px; }
+.fb-still { transform: translate(-50%, -50%); animation: wfade .8s ease both; }
+.flyby.fb-caught { pointer-events: none; }
+.flyby.fb-caught .fb-art { animation: fbCatch .5s var(--ease) forwards; }
+.flyby.fb-gone { opacity: 0; transition: opacity .5s; }
+@keyframes fbCatch { 30% { transform: scale(1.45); } to { transform: scale(.2); opacity: 0; } }
+.fb-tip { position: absolute; left: 0; top: 0; padding: 4px 10px; border-radius: 999px; background: var(--overlay-solid); border: 1px solid var(--border); color: var(--foreground); font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow); pointer-events: none; animation: wfade .5s .6s ease both; }
+.fb-blink { animation: fbBlink 1.2s steps(1) infinite; }
+@keyframes fbBlink { 50% { opacity: .15; } }
+.fb-flame { transform-origin: 14px 20px; animation: fbFlame .12s ease-in-out infinite alternate; }
+@keyframes fbFlame { to { transform: scaleX(.72); } }
+.fb-wing { transform-origin: 32px 26px; animation: fbFlap .3s ease-in-out infinite alternate; }
+.fb-gold .fb-wing { animation-duration: .2s; }
+@keyframes fbFlap { to { transform: scaleX(.28); } }
+.fb-buzz { transform-origin: 26px 17px; animation: fbBuzz .05s linear infinite alternate; }
+@keyframes fbBuzz { to { transform: rotate(-16deg); } }
+.fb-tail { transform-origin: 30px 64px; animation: fbTail 1.3s ease-in-out infinite alternate; }
+@keyframes fbTail { from { transform: rotate(-9deg); } to { transform: rotate(9deg); } }
+.fb-twinkle { animation: fbTw 1s ease-in-out infinite alternate; }
+@keyframes fbTw { to { opacity: .15; } }
+@media (prefers-reduced-motion: reduce) { .flyby *, .flyby.fb-caught .fb-art { animation: none !important; } }
+
+.sky-ch { width: min(500px, calc(100vw - 32px)); --ch-ok: #22a55b; --ch-no: #df4f3b; --lv: #8b95a1; }
+.sky-ch[data-level="easy"] { --lv: #22a55b; }
+.sky-ch[data-level="medium"] { --lv: #3b82f6; }
+.sky-ch[data-level="hard"] { --lv: #a855f7; }
+.sky-ch[data-level="legendary"] { --lv: #e09a12; }
+.ch-head { display: flex; align-items: center; gap: 14px; padding-right: 36px; }
+.ch-art { flex: none; width: 66px; height: 66px; border-radius: 18px; display: grid; place-items: center; padding: 9px; overflow: hidden; }
+.sky-ch[data-sky="night"] .ch-art { background: radial-gradient(circle at 50% 35%, #26335a, #0b0f1e 75%); }
+.sky-ch[data-sky="day"] .ch-art { background: radial-gradient(circle at 50% 25%, #e6f2fc, #a8cdef); }
+.ch-art svg { width: 100%; height: 100%; overflow: visible; }
+.ch-art.gold { box-shadow: 0 0 0 1px rgba(240, 168, 28, .55), 0 10px 26px -8px rgba(240, 168, 28, .7); }
+.ch-eyebrow { display: block; margin-bottom: 4px; font-size: 12.5px; color: var(--muted-foreground); }
+.ch-eyebrow b { color: var(--lv); font-weight: 650; }
+.ch-pips { display: flex; gap: 6px; }
+.ch-pips i { flex: 1; height: 4px; border-radius: 4px; background: var(--muted); transition: background .3s; }
+.ch-pips i.on { background: color-mix(in srgb, var(--lv) 55%, var(--muted)); }
+.ch-pips i.ok { background: var(--ch-ok); }
+.ch-pips i.no { background: var(--ch-no); }
+.ch-body { display: grid; gap: 12px; }
+.sky-ch [hidden] { display: none !important; }
+.ch-subj { display: flex; align-items: center; gap: 12px; }
+.ch-th { width: 58px; height: 58px; flex: none; border-radius: 12px; --c: var(--accent); }
+.ch-prompt { margin: 0; font-size: 15.5px; line-height: 1.35; }
+.ch-prompt b { font-family: var(--font-display); font-size: 22px; font-weight: 600; line-height: 1.1; }
+.ch-hint { display: block; margin-top: 2px; font-size: 12.5px; color: var(--muted-foreground); }
+.ch-quote { margin: 0; padding: 12px 14px; border-left: 3px solid var(--lv); border-radius: 0 10px 10px 0; background: var(--muted); font-size: 14px; line-height: 1.5; }
+.ch-blank { display: inline-block; width: 3.2em; height: .95em; vertical-align: -2px; border-radius: 4px; background: color-mix(in srgb, var(--lv) 35%, transparent); }
+.ch-clock { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 10px; }
+.ch-clock::before { content: ""; grid-area: 1 / 1; height: 6px; border-radius: 6px; background: var(--muted); }
+.ch-clock i { grid-area: 1 / 1; height: 6px; border-radius: 6px; background: var(--lv); transform-origin: left; transition: transform .1s linear, background .3s; }
+.ch-clock span { min-width: 2ch; text-align: right; font: 600 12.5px var(--font-mono); color: var(--muted-foreground); }
+.ch-clock.low i { background: var(--ch-no); }
+.ch-clock.low span { color: var(--ch-no); }
+.ch-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ch-opts.n3 { grid-template-columns: 1fr; }
+.ch-opt { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--foreground); font: inherit; font-size: 14.5px; text-align: left; cursor: pointer; transition: border-color .2s, background .2s, transform .15s, opacity .3s; }
+.ch-opt:hover:not(:disabled) { border-color: color-mix(in srgb, var(--lv) 60%, var(--border)); background: color-mix(in srgb, var(--lv) 6%, var(--card)); }
+.ch-opt:active:not(:disabled) { transform: scale(.98); }
+.ch-opt:disabled { cursor: default; }
+.ch-opt kbd { flex: none; width: 21px; height: 21px; display: grid; place-items: center; border-radius: 6px; background: var(--muted); color: var(--muted-foreground); font: 600 11px var(--font-mono); transition: background .2s, color .2s; }
+.ch-oth { width: 34px; height: 34px; flex: none; border-radius: 8px; }
+.ch-ol { flex: 1; min-width: 0; display: grid; gap: 1px; font-weight: 550; line-height: 1.25; }
+.ch-ol small { font-size: 12px; font-weight: 400; color: var(--muted-foreground); }
+.ch-after { flex: none; font: 500 12px var(--font-mono); font-style: normal; color: var(--muted-foreground); opacity: 0; transition: opacity .3s; }
+.ch-opts.shown .ch-after { opacity: 1; }
+.ch-opt.right { border-color: var(--ch-ok); background: color-mix(in srgb, var(--ch-ok) 12%, var(--card)); }
+.ch-opt.right kbd { background: var(--ch-ok); color: #fff; }
+.ch-opt.wrong { border-color: var(--ch-no); background: color-mix(in srgb, var(--ch-no) 10%, var(--card)); animation: chShake .35s; }
+.ch-opt.wrong kbd { background: var(--ch-no); color: #fff; }
+.ch-opt.dim { opacity: .5; }
+@keyframes chShake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+.ch-why { margin: 0; font-size: 14px; line-height: 1.45; color: var(--muted-foreground); animation: wfade .3s ease both; }
+.ch-why b { color: var(--foreground); font-weight: 600; }
+.ch-end { display: grid; gap: 12px; justify-items: center; text-align: center; }
+.ch-end .sheet-go { width: 100%; }
+.sky-ch .ch-big { margin: 0; font-family: var(--font-display); font-size: 34px; font-weight: 600; line-height: 1; letter-spacing: 0; text-transform: none; color: var(--foreground); }
+.ch-end.win .ch-big { color: var(--r); }
+.ch-fact { width: 100%; text-align: left; }
+.ch-drops { margin: 0; font: 500 12.5px var(--font-mono); color: var(--accent); }
+.ch-tally b { font-weight: 650; }
+.sky-ch .sheet-go:hover { background: var(--accent); filter: brightness(1.07); }
+@media (max-width: 520px) { .sky-ch { width: 100vw; } }
+@media (max-width: 560px) { .ch-opts { grid-template-columns: 1fr; } .ch-art { width: 54px; height: 54px; } .ch-prompt b { font-size: 20px; } }
+@media (prefers-reduced-motion: reduce) { .ch-opt.wrong, .ch-why { animation: none; } }
 /* ── rarity points ── */
 .g-pts { display: inline-block; margin-right: 7px; padding: 1px 7px; border-radius: 999px; font: 600 12px/18px var(--font-mono); background: var(--muted); color: var(--foreground); vertical-align: 1px; }
 .g-pts.r-uncommon { background: color-mix(in srgb, #3b82f6 16%, var(--card)); color: #2563eb; }
