@@ -3027,6 +3027,10 @@ const LIKE = {
   cassia: ['cinnamon', 'spice'], samphire: ['rosemary', 'green'],
   opoponax: ['myrrh', 'resin'], copal: ['frankincense', 'resin'], deodar: ['cedar', 'wood'], asafoetida: ['benzoin', 'resin'], wasabi: ['ginseng', 'green'],
   daphne: ['lilac', 'floral'], amaryllis: ['lily', 'floral'], rangooncreeper: ['honeysuckle', 'floral'], tobaccoflower: ['datura', 'floral'],
+  appleblossom: ['cherryblossom', 'floral'], peachblossom: ['cherryblossom', 'floral'], pearblossom: ['cherryblossom', 'floral'], lemonblossom: ['neroli', 'floral'],
+  bellflower: ['lotv', 'floral'], bluebell: ['hyacinth', 'floral'], wallflower: ['sweetpea', 'floral'], goldenrod: ['mimosa', 'floral'], babysbreath: ['elderflower', 'floral'],
+  callalily: ['lily', 'floral'], poppy: ['tulip', 'floral'], kowhai: ['broom', 'floral'], cedarleaf: ['cypress', 'wood'], witchhazel: ['tagetes', 'floral'],
+  santolina: ['immortelle', 'floral'], dill: ['angelica', 'green'], barley: ['rice', 'gourmand'], timut: ['sichuan', 'spice'],
 };
 function eighthNotes(ing) {
   const id = ing.id, r = rng(hash(id)), g = new THREE.Group(), [c0, c1, c2] = ing.c;
@@ -3171,6 +3175,274 @@ function eighthNotes(ing) {
       const stick = mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.62, 8), M.std('#c8a070', { roughness: 0.8 })); g.add(place(stick, 0.2, 0.12, -0.2, 0, 0, 1.25));
       const toast = M.std('#b0703a', { roughness: 0.6, clearcoat: 0.4, bumpMap: noiseTex('toast', 60, 2), bumpScale: 2 });
       const tm = mesh(cyl, toast); place(tm, 0.39, 0.135, -0.2, 0, 0, 1.25 + Math.PI / 2); tm.position.x -= 0.04; g.add(tm);
+      return g;
+    }
+  }
+  return ninthNotes(ing);
+}
+
+// ── specimens for the v50 notes: aroma molecules, gourmand treats, earth and stone ──
+// aroma molecules are drawn as ball-and-stick models from a flat sketch (bond length 1)
+function sketch() {
+  const atoms = [], bonds = [];
+  const at = (x, y, e = 'C') => { let i = atoms.findIndex(([a, b]) => Math.hypot(a - x, b - y) < 0.2); if (i < 0) { atoms.push([x, y, e]); i = atoms.length - 1; } else if (e !== 'C') atoms[i][2] = e; return i; };
+  const bond = (a, b, o = 1) => { if (!bonds.some(([p, q]) => (p === a && q === b) || (p === b && q === a))) bonds.push([a, b, o]); };
+  const ring = (cx, cy, n, rot = 0, els = {}, dbl = []) => {
+    const r = 1 / (2 * Math.sin(Math.PI / n)), ids = [];
+    for (let k = 0; k < n; k++) { const a = rot + k * TAU / n; ids.push(at(cx + r * Math.cos(a), cy + r * Math.sin(a), els[k] || 'C')); }
+    for (let k = 0; k < n; k++) bond(ids[k], ids[(k + 1) % n], dbl.includes(k) ? 2 : 1);
+    return ids;
+  };
+  const arm = (from, ang, e = 'C', o = 1) => { const [x, y] = atoms[from]; const i = at(x + Math.cos(ang), y + Math.sin(ang), e); bond(from, i, o); return i; };
+  // a zigzag chain of n carbons starting from atom `from`, heading `ang`
+  const chain = (from, ang, n, flip = 1) => { let i = from; for (let k = 0; k < n; k++) i = arm(i, ang + (k % 2 ? -1 : 1) * flip * Math.PI / 6); return i; };
+  return { atoms, bonds, at, bond, ring, arm, chain };
+}
+function moleculeModel(sk, tint) {
+  const g = new THREE.Group(), mol = new THREE.Group(), { atoms, bonds } = sk;
+  const col = { C: '#3b4048', O: '#d9473b' }, rad = { C: 0.032, O: 0.037 };
+  const mats = {}, mat = (e) => (mats[e] ||= M.std(col[e], { roughness: 0.22, clearcoat: 1, clearcoatRoughness: 0.1 }));
+  const bondM = M.std(shade(tint, 0.25), { roughness: 0.3, clearcoat: 0.8 });
+  const xs = atoms.map((a) => a[0]), ys = atoms.map((a) => a[1]);
+  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 3), s = 0.66 / span;
+  const cx = (Math.max(...xs) + Math.min(...xs)) / 2, cy = (Math.max(...ys) + Math.min(...ys)) / 2;
+  // a little depth so it reads as 3D when it turns: atoms pucker in and out of the sketch plane
+  const P = atoms.map(([x, y], i) => V3((x - cx) * s, (y - cy) * s, Math.sin(i * 2.3) * 0.025));
+  const ball = {}; atoms.forEach(([, , e], i) => mol.add(mesh((ball[e] ||= new THREE.SphereGeometry(rad[e], 28, 18)), mat(e), P[i].x, P[i].y, P[i].z)));
+  const up = V3(0, 1, 0);
+  for (const [a, b, o] of bonds) {
+    const A = P[a], B = P[b], d = B.clone().sub(A), len = d.length(), mid = A.clone().add(B).multiplyScalar(0.5);
+    const q = new THREE.Quaternion().setFromUnitVectors(up, d.clone().normalize()), side = V3(-d.y, d.x, 0).normalize();
+    for (let k = 0; k < o; k++) {
+      const m = mesh(new THREE.CylinderGeometry(o > 1 ? 0.0065 : 0.009, o > 1 ? 0.0065 : 0.009, len, 10), bondM);
+      m.position.copy(mid).addScaledVector(side, o > 1 ? (k - 0.5) * 0.016 : 0); m.quaternion.copy(q); mol.add(m);
+    }
+  }
+  place(mol, 0, 0.27, 0, -0.12, 0.35, 0); g.add(mol);
+  return g;
+}
+const R6 = Math.PI / 6, SQ3 = Math.sqrt(3);
+const MOLECULES = {
+  // undecanal-style fatty aldehyde: a long chain ending in C=O
+  aldehydes() { const k = sketch(); const c0 = k.at(0, 0); const end = k.chain(c0, 0, 9); k.arm(end, Math.PI / 3, 'O', 2); return k; },
+  // methyl dihydrojasmonate: cyclopentanone with a pentyl tail and a methyl ester arm
+  hedione() {
+    const k = sketch(), r = k.ring(0, 0, 5, Math.PI / 2);
+    k.arm(r[0], Math.PI / 2, 'O', 2);
+    k.chain(r[1], Math.PI * 0.95, 5, -1);
+    const a = k.arm(r[4], -0.1), c = k.arm(a, 0.45); k.arm(c, 1.5, 'O', 2); const o = k.arm(c, -0.6, 'O'); k.arm(o, 0.2);
+    return k;
+  },
+  // OTNE (Iso E Super): two fused rings, four methyls and an acetyl group
+  isoesuper() {
+    const k = sketch(), a = k.ring(0, 0, 6, R6), b = k.ring(SQ3, 0, 6, R6, {}, [5]);
+    k.arm(a[1], Math.PI / 2); k.arm(a[3], Math.PI * 7 / 6 - 0.6); k.arm(a[3], Math.PI * 7 / 6 + 0.6);
+    k.arm(b[4], -Math.PI / 2);
+    const ac = k.arm(b[0], Math.PI / 6); k.arm(ac, Math.PI / 2, 'O', 2); k.arm(ac, -Math.PI / 6);
+    return k;
+  },
+  // DPMI (Cashmeran): a six ring fused to a five ring, a ketone and five methyls
+  cashmeran() {
+    const k = sketch(), a = k.ring(0, 0, 6, R6), b = k.ring(SQ3 / 2 + 0.688, 0, 5, Math.PI * 0.8);
+    k.arm(a[1], Math.PI / 2, 'O', 2);
+    const D = Math.PI / 180;
+    for (const [i, ang] of [[b[2], 253 * D], [b[2], 323 * D], [b[3], 0], [b[4], 37 * D], [b[4], 107 * D]]) k.arm(i, ang);
+    return k;
+  },
+  // coumarin: a benzene ring fused to a lactone ring
+  coumarin() {
+    const k = sketch(); k.ring(0, 0, 6, R6, {}, [1, 3, 5]);
+    const b = k.ring(SQ3, 0, 6, R6, { 4: 'O' }, [0]);
+    k.arm(b[5], -R6, 'O', 2);
+    return k;
+  },
+  // HHCB (Galaxolide): benzene, cyclopentane and pyran rings, six methyls
+  galaxolide() {
+    const k = sketch(), a = k.ring(0, 0, 6, R6, {}, [0, 2, 4]), p = k.ring(SQ3, 0, 6, R6, { 0: 'O' });
+    const c = k.ring(-SQ3 / 2 - 0.688, 0, 5, Math.PI * 0.2), D = Math.PI / 180;
+    k.arm(p[4], -Math.PI / 2);
+    for (const [i, ang] of [[c[1], 90 * D], [c[1], 140 * D], [c[2], 180 * D], [c[3], 220 * D], [c[3], 270 * D]]) k.arm(i, ang);
+    return k;
+  },
+};
+function ninthNotes(ing) {
+  const id = ing.id, r = rng(hash(id)), g = new THREE.Group(), [c0, c1, c2] = ing.c;
+  if (MOLECULES[id]) return moleculeModel(MOLECULES[id](), c0);
+  const lathe = (pts, seg = 48) => new THREE.LatheGeometry(pts.map(([a, b]) => new THREE.Vector2(a, b)), seg);
+  switch (id) {
+    case 'mushroom': {
+      const capM = M.std('#8a5a36', { roughness: 0.72, bumpMap: noiseTex('mcap', 30, 1.6), bumpScale: 2.5, sheen: 0.5, sheenColor: new THREE.Color('#d8b890') });
+      const stemM = M.std('#efe4cf', { roughness: 0.85, bumpMap: noiseTex('mstem', 50, 1.2, [1, 3]), bumpScale: 1.5 });
+      const gillM = M.std('#e8dcc2', { roughness: 0.95, side: THREE.DoubleSide });
+      const cap = lathe([[0, -0.005], [0.12, -0.005], [0.135, 0.012], [0.13, 0.045], [0.1, 0.08], [0.055, 0.1], [0, 0.106]], 56);
+      const gills = new THREE.CircleGeometry(0.125, 48); gills.rotateX(Math.PI / 2);
+      const shroom = (h, s) => {
+        const m = new THREE.Group(); m.add(mesh(lathe([[0, 0], [0.05, 0], [0.058, 0.025], [0.046, h * 0.6], [0.04, h], [0, h]], 32), stemM));
+        const c = new THREE.Group(); c.add(mesh(cap, capM)); c.add(mesh(gills, gillM, 0, -0.004, 0)); c.position.y = h; m.add(c); m.scale.setScalar(s); return m;
+      };
+      g.add(place(shroom(0.24, 1.1), -0.1, 0, -0.05, 0, 0, 0.06));
+      g.add(place(shroom(0.16, 0.85), 0.12, 0, 0.08, 0, 1, -0.1));
+      g.add(place(shroom(0.2, 0.8), 0.28, 0.045, -0.12, 0, 0.4, Math.PI / 2 - 0.08));
+      const needle = new THREE.CylinderGeometry(0.0025, 0.0025, 0.09, 5), nl = [];
+      for (let k = 0; k < 40; k++) { const a = r() * TAU, d = 0.18 + r() * 0.25; nl.push([V3(Math.cos(a) * d, 0.004, Math.sin(a) * d), V3(r() - 0.5, 0.05, r() - 0.5).normalize(), 1, 0]); }
+      instances(g, needle, M.std('#9a7a4a', { roughness: 0.8 }), nl);
+      return g;
+    }
+    case 'beetroot': {
+      const skin = M.std('#5a1328', { roughness: 0.45, clearcoat: 0.4, bumpMap: noiseTex('beet', 40, 1.2), bumpScale: 1.5 });
+      const body = sphereFruit(0.15, skin, { sy: 0.92 }); g.add(place(body, -0.12, 0.14, 0));
+      const tail = new THREE.ConeGeometry(0.05, 0.3, 24); tail.translate(0, -0.15, 0);
+      g.add(place(mesh(tail, skin), 0.02, 0.07, 0.02, 0, 0, 1.25));
+      for (const [a, s] of [[2.3, 1.0], [2.9, 0.85], [1.8, 0.9]]) {
+        const tip = V3(-0.12 + Math.cos(a) * 0.3 * s, 0.32 + s * 0.12, Math.sin(a) * 0.3 * s - 0.05);
+        g.add(stem([V3(-0.16, 0.27, 0), V3(-0.2, 0.33, -0.02), tip], 0.01, '#9a1e48'));
+        leafAt(g, tip.x, tip.z, a + 1.2, '#3f6b2a', 0.85, 'ovate', tip.y - 0.02, -0.7);
+      }
+      // a slice, showing the rings
+      const face = canvasTex('beetrings', 256, 256, (c, W) => { for (let k = 9; k > 0; k--) { c.fillStyle = k % 2 ? '#8e1a43' : '#c43a6c'; c.beginPath(); c.arc(W / 2, W / 2, (W / 2) * (k / 9), 0, TAU); c.fill(); } });
+      const sl = new THREE.CylinderGeometry(0.12, 0.12, 0.025, 48);
+      g.add(place(mesh(sl, [skin, M.std(0xffffff, { map: face, roughness: 0.3, clearcoat: 0.8 }), skin]), 0.24, 0.013, 0.2));
+      return g;
+    }
+    case 'grape': {
+      const berry = M.std(c0, { roughness: 0.32, clearcoat: 0.5, clearcoatRoughness: 0.4, sheen: 0.8, sheenColor: new THREE.Color('#b8a8d8'), sheenRoughness: 0.4 });
+      const geo = new THREE.SphereGeometry(0.042, 28, 20); geo.scale(1, 1, 1.1);
+      const list = [];
+      for (let layer = 0; layer < 7; layer++) {
+        const rad = 0.11 * (1 - layer / 8), n = Math.max(1, Math.round(rad / 0.016));
+        for (let k = 0; k < n; k++) { const a = k / n * TAU + layer * 0.5; list.push([V3(-0.2 + layer * 0.065, 0.13 + Math.sin(a) * rad, Math.cos(a) * rad), V3(1, 0, 0), 0.9 + r() * 0.2, a]); }
+      }
+      instances(g, geo, berry, list);
+      g.add(stem([V3(-0.26, 0.15, 0), V3(-0.33, 0.2, 0.02), V3(-0.4, 0.22, 0.06)], 0.009, '#6a5a32'));
+      leafAt(g, -0.32, -0.18, 2.4, '#4f7a2e', 1.3, 'lobed', 0.02, -1.45);
+      const loose = sphereFruit(0.042, berry, { sz: 1.1 }); g.add(place(loose, 0.3, 0.042, 0.18));
+      return g;
+    }
+    case 'fingerlime': {
+      const peel = M.std(c2, { roughness: 0.45, bumpMap: noiseTex('flime', 70, 1.5), bumpScale: 1.6, clearcoat: 0.4 });
+      for (const [x, z, a] of [[-0.2, 0, 0.3], [-0.05, 0.12, -0.2], [0.05, -0.14, 0.9]]) { const f = sphereFruit(0.045, peel, { sz: 3 }); g.add(place(f, x, 0.045, z, 0, a, 0)); }
+      // a cut finger spills its pearls
+      const half = sphereFruit(0.045, peel, { sz: 1.6 }); g.add(place(half, 0.26, 0.045, 0.1, 0, -0.5, 0));
+      const pearls = pile(new THREE.SphereGeometry(0.011, 12, 8), M.std(c1, { roughness: 0.1, transmission: 0.5, thickness: 0.2, clearcoat: 1 }), 50, 0.1, 7, { height: 0.25 });
+      pearls.position.set(0.32, 0, 0.2); g.add(pearls);
+      leafAt(g, -0.32, -0.16, 2.2, '#3f6b2a', 0.6);
+      return g;
+    }
+    case 'macaron': {
+      const shellGeo = lathe([[0, 0], [0.068, 0], [0.074, 0.008], [0.075, 0.016], [0.07, 0.024], [0.05, 0.036], [0, 0.04]], 48);
+      const foot = displace(new THREE.TorusGeometry(0.066, 0.008, 8, 48), 0.003, 30, 2, 3); foot.rotateX(Math.PI / 2);
+      const mac = (col, fill) => {
+        const m = new THREE.Group(), sm = M.std(col, { roughness: 0.55, sheen: 0.5, sheenColor: new THREE.Color('#ffffff') }), fm = M.std(fill, { roughness: 0.7 });
+        const bot = mesh(shellGeo, sm); bot.scale.y = -1; bot.position.y = 0.04; m.add(bot); m.add(mesh(foot, sm, 0, 0.044, 0));
+        m.add(mesh(new THREE.CylinderGeometry(0.064, 0.064, 0.02, 40), fm, 0, 0.05, 0));
+        m.add(mesh(foot, sm, 0, 0.058, 0)); m.add(mesh(shellGeo, sm, 0, 0.06, 0)); return m;
+      };
+      g.add(place(dish(0.3, '#f4ede4', false), 0, 0, 0));
+      g.add(place(mac(c0, '#fbe9ef'), -0.08, 0.025, 0.02, 0, 0.3, 0));
+      g.add(place(mac('#b8d89a', '#f1e8cf'), -0.08, 0.125, 0.02, 0.05, 1, 0.08));
+      g.add(place(mac('#c9b4e6', '#f4ecf8'), 0.14, 0.09, -0.06, 0, 0, 1.35));
+      g.add(place(mac('#f2d38a', '#6a3a24'), 0.12, 0.025, 0.15, 0, 2, 0));
+      return g;
+    }
+    case 'bread': {
+      const crust = M.std('#c0803a', { roughness: 0.62, clearcoat: 0.3, bumpMap: noiseTex('crust', 40, 1.8), bumpScale: 2.5 });
+      // a baguette lying across the board, its slashes opened pale in the oven
+      const bag = new THREE.Group(), cut = M.std('#e8c88e', { roughness: 0.8 });
+      bag.add(sphereFruit(0.08, crust, { sz: 5.2, sy: 0.7, bump: 0.004, seed: 2 }));
+      for (let k = -2; k <= 2; k++) { const sl = sphereFruit(0.028, cut, { sz: 2.6, sy: 0.3 }); sl.position.set(0.012, 0.052, k * 0.075); sl.rotation.y = 0.4; bag.add(sl); }
+      g.add(place(bag, -0.06, 0.054, -0.06, 0, Math.PI / 2 - 0.25, 0));
+      const crumb = canvasTex('crumb', 256, 256, (c, W) => { c.fillStyle = '#b8742e'; c.beginPath(); c.arc(W / 2, W / 2, W / 2, 0, TAU); c.fill(); c.fillStyle = '#f3e2bd'; c.beginPath(); c.arc(W / 2, W / 2, W / 2 - 14, 0, TAU); c.fill(); const rr = rng(5); for (let k = 0; k < 140; k++) { c.fillStyle = `rgba(190,150,90,${0.25 + rr() * 0.35})`; c.beginPath(); c.ellipse(30 + rr() * (W - 60), 30 + rr() * (W - 60), 2 + rr() * 6, 1.5 + rr() * 4, rr() * 3, 0, TAU); c.fill(); } });
+      const slice = new THREE.CylinderGeometry(0.085, 0.085, 0.022, 40);
+      const fm = M.std(0xffffff, { map: crumb, roughness: 0.85 });
+      g.add(place(mesh(slice, [crust, fm, fm]), 0.25, 0.012, 0.16, 0, 0, 0)); g.add(place(mesh(slice, [crust, fm, fm]), 0.3, 0.05, 0.1, 0.25, 0.4, 0.15));
+      const wheat = pile(new THREE.SphereGeometry(0.008, 8, 6).scale(0.7, 0.6, 1.6), M.std('#d8b070', { roughness: 0.6 }), 30, 0.06, 4, { height: 0.2 }); wheat.position.set(-0.3, 0, 0.22); g.add(wheat);
+      return g;
+    }
+    case 'flint': {
+      const core = M.std('#2a2c31', { roughness: 0.16, clearcoat: 1, clearcoatRoughness: 0.08 });
+      const cortex = M.std('#e9e4d6', { roughness: 0.95, bumpMap: noiseTex('cortex', 30, 2), bumpScale: 3 });
+      const nod = blob(0.12, 0.045, 3, 11, 3); nod.scale(1.2, 0.8, 1); g.add(place(mesh(nod, cortex), -0.18, 0.09, -0.04));
+      // a split nodule: the glassy black heart inside its chalky rind
+      const inner = blob(0.095, 0.02, 4, 12, 3); inner.scale(1.2, 0.8, 1); g.add(place(mesh(inner, core), -0.18, 0.09, 0.03));
+      for (const [x, z, a, s] of [[0.16, 0.08, 0.3, 1], [0.27, -0.1, 1.7, 0.75], [0.05, 0.2, 2.6, 0.6]]) {
+        const sh = new THREE.OctahedronGeometry(0.09, 0); sh.scale(1.4, 0.32, 0.8); const m = mesh(displace(sh, 0.008, 6, 1, x * 10 | 0), core); g.add(place(m, x, 0.03 * s, z, 0.1, a, 0.05, s));
+      }
+      return g;
+    }
+    case 'sand': {
+      const sandM = M.std('#efe3c4', { roughness: 0.95, bumpMap: noiseTex('dune', 90, 1.6), bumpScale: 2.2 });
+      const dune = lathe([[0, 0], [0.5, 0], [0.46, 0.008], [0.34, 0.04], [0.2, 0.1], [0.08, 0.15], [0, 0.16]], 64);
+      const p = dune.attributes.position; for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i), y = p.getY(i); p.setY(i, y * (1 + 0.18 * Math.sin(x * 9 + z * 4)) + 0.006 * Math.sin(x * 60)); }
+      dune.computeVertexNormals(); g.add(mesh(dune, sandM));
+      const shellM = M.std('#f6dccb', { roughness: 0.4, clearcoat: 0.6 });
+      const shell = bendPlane(0.09, 0.08, { cup: 1.4 }); const sm = mesh(shell, M.std('#f3d2bd', { roughness: 0.45, side: THREE.DoubleSide, clearcoat: 0.6 }));
+      g.add(place(sm, 0.28, 0.06, 0.18, -1.2, 0.6, 0));
+      const conch = new THREE.ConeGeometry(0.035, 0.11, 20); g.add(place(mesh(displace(conch, 0.004, 10, 1, 2), shellM), -0.3, 0.05, 0.2, 0, 0.5, 1.4));
+      const pebble = blob(0.03, 0.006, 3, 4, 3); pebble.scale(1.3, 0.6, 1); g.add(place(mesh(pebble, M.std('#9a948a', { roughness: 0.3, clearcoat: 0.8 })), 0.1, 0.13, -0.05));
+      return g;
+    }
+    case 'milk': {
+      const tumbler = [[0, 0], [0.09, 0], [0.1, 0.005], [0.11, 0.3], [0.104, 0.3], [0.094, 0.015], [0, 0.015]];
+      g.add(mesh(lathe(tumbler, 64), M.glass({ thickness: 0.03 }), -0.08, 0, 0));
+      const milkM = M.std('#fbfaf5', { roughness: 0.25, clearcoat: 0.6, sheen: 0.6, sheenColor: new THREE.Color('#ffffff') });
+      g.add(mesh(lathe([[0, 0.015], [0.093, 0.015], [0.102, 0.24], [0, 0.24]], 64), milkM, -0.08, 0, 0));
+      // a little pitcher pouring
+      const jug = lathe([[0, 0], [0.06, 0], [0.07, 0.03], [0.065, 0.1], [0.05, 0.14], [0.055, 0.17], [0.05, 0.17], [0.045, 0.14], [0, 0.14]], 40);
+      g.add(place(mesh(jug, M.std('#e7eef2', { roughness: 0.3, clearcoat: 0.8 })), 0.17, 0, 0.06, 0, 0, 0, 1.3));
+      const puddle = sphereFruit(0.05, milkM, { sy: 0.08, sz: 0.7 }); g.add(place(puddle, 0.1, 0.002, 0.2));
+      return g;
+    }
+    case 'whippedcream': {
+      const cream = M.std('#fffaf0', { roughness: 0.6, sheen: 0.8, sheenColor: new THREE.Color('#ffffff'), clearcoat: 0.2 });
+      const swirl = (h, rad) => {
+        const geo = lathe([[0, 0], [rad, 0], [rad * 1.02, h * 0.15], [rad * 0.85, h * 0.4], [rad * 0.55, h * 0.7], [rad * 0.25, h * 0.92], [0, h]], 96);
+        const p = geo.attributes.position; for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i), y = p.getY(i), a = Math.atan2(z, x), k = 1 + 0.16 * Math.cos(8 * (a + (y / h) * 2.2)); p.setX(i, x * k); p.setZ(i, z * k); }
+        geo.computeVertexNormals(); return mesh(geo, cream);
+      };
+      const cup = lathe([[0, 0], [0.08, 0], [0.11, 0.02], [0.14, 0.13], [0.135, 0.13], [0.1, 0.03], [0, 0.03]], 56);
+      g.add(place(mesh(cup, M.std(c2, { roughness: 0.3, clearcoat: 0.9 })), -0.06, 0, 0));
+      g.add(place(swirl(0.2, 0.12), -0.06, 0.1, 0));
+      g.add(place(swirl(0.09, 0.06), 0.22, 0, 0.14));
+      const berry = sphereFruit(0.03, M.std('#d0233a', { roughness: 0.3, clearcoat: 0.8 }), { sy: 1.25 }); g.add(place(berry, -0.06, 0.32, 0.0, 0.3, 0, 0.2));
+      return g;
+    }
+    case 'fern': {
+      const pin = M.leaf('#3f7d32', '#2a5a22', 'long');
+      const frond = (pts, n, len) => {
+        const f = new THREE.Group(), curve = new THREE.CatmullRomCurve3(pts);
+        f.add(mesh(tube(pts, 0.006, 30, 5, 0.6), M.std('#4a6a2a', { roughness: 0.6 })));
+        for (let k = 1; k < n; k++) {
+          const t = k / n, p = curve.getPointAt(t), tan = curve.getTangentAt(t), side = tan.clone().cross(V3(0, 1, 0)).normalize();
+          const L = len * (1 - t * 0.78) * (0.55 + 0.45 * Math.sin(Math.min(1, t * 4) * Math.PI / 2));
+          for (const sgn of [1, -1]) {
+            const geo = bendPlane(0.032, L, { cup: 0.4, droop: 0.15 }); geo.rotateX(Math.PI / 2);
+            const piv = new THREE.Group(); piv.position.copy(p); piv.add(mesh(geo, pin)); f.add(piv);
+            piv.lookAt(p.clone().addScaledVector(side, sgn).addScaledVector(tan, 0.35).add(V3(0, -0.15, 0)));
+          }
+        }
+        return f;
+      };
+      g.add(frond([V3(0, 0.02, 0), V3(0.05, 0.25, -0.02), V3(0.22, 0.42, 0.0), V3(0.42, 0.38, 0.02)], 18, 0.14));
+      g.add(frond([V3(0, 0.02, 0), V3(-0.06, 0.22, 0.04), V3(-0.24, 0.34, 0.1), V3(-0.4, 0.26, 0.14)], 16, 0.12));
+      g.add(frond([V3(0, 0.02, 0), V3(0.0, 0.2, 0.1), V3(0.05, 0.3, 0.3), V3(0.1, 0.2, 0.42)], 14, 0.11));
+      // a fiddlehead, still curled
+      const fid = []; for (let k = 0; k <= 20; k++) { const t = k / 20, a = t * 4.2, rr = 0.06 * (1 - t * 0.8); fid.push(V3(-0.2 + Math.sin(a) * rr, 0.02 + t * 0.12 + Math.cos(a) * rr * 0.6, -0.2)); }
+      g.add(mesh(tube(fid, 0.012, 40, 6, 0.6), M.std('#6a8a3a', { roughness: 0.7, bumpMap: noiseTex('fid', 40, 1), bumpScale: 1 })));
+      return g;
+    }
+    case 'clover': {
+      const lm = M.leaf('#3f8a3a', '#2a6a2a', 'heart');
+      const trefoil = (x, z, y, rot, s) => {
+        g.add(stem([V3(x, 0.01, z + 0.06), V3(x, y * 0.6, z + 0.02), V3(x, y, z)], 0.005, '#4f7a3a'));
+        for (let k = 0; k < 3; k++) { const geo = bendPlane(0.09 * s, 0.09 * s, { cup: 0.4 }); geo.rotateX(Math.PI / 2); const piv = new THREE.Group(); piv.position.set(x, y, z); piv.add(mesh(geo, lm)); g.add(piv); const a = rot + k * TAU / 3; piv.lookAt(x + Math.cos(a), y - 0.15, z + Math.sin(a)); }
+      };
+      trefoil(-0.15, 0.05, 0.14, 0.2, 1); trefoil(0.12, 0.12, 0.09, 1.2, 0.9); trefoil(0.2, -0.12, 0.12, 2.1, 1.05); trefoil(-0.05, -0.16, 0.07, 0.8, 0.8);
+      // a flower head: a ball of tiny pink-white florets
+      const head = new THREE.Group(), flor = new THREE.ConeGeometry(0.008, 0.04, 6); flor.translate(0, 0.02, 0); const list = [];
+      for (let k = 0; k < 90; k++) { const v = V3(r() - 0.5, r() - 0.3, r() - 0.5).normalize(); list.push([v.clone().multiplyScalar(0.035), v, 1, 0]); }
+      instances(head, flor, M.std(c1, { roughness: 0.6, sheen: 0.8, sheenColor: new THREE.Color('#ffffff') }), list);
+      head.add(mesh(new THREE.SphereGeometry(0.035, 20, 14), M.std(c0, { roughness: 0.7 })));
+      place(head, 0.02, 0.26, 0.0); g.add(head); g.add(stem([V3(0.02, 0.24, 0), V3(0.0, 0.12, 0.03), V3(0.02, 0.01, 0.06)], 0.006, '#4f7a3a'));
       return g;
     }
   }

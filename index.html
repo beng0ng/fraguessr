@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Guess the notes in today's perfume, then pin where they grow on a 3D globe. A new fragrance puzzle every day, plus an atlas of 318 ingredients and 480+ perfumes.">
+<meta name="description" content="Guess the notes in today's perfume, then pin where they grow on a 3D globe. A new fragrance puzzle every day, plus an atlas of 354 ingredients and 600 perfumes.">
 <meta name="theme-color" content="#0f0d0c">
 <meta property="og:site_name" content="Fraguessr">
 <meta property="og:title" content="Fraguessr: the daily perfume guessing game">
@@ -1764,6 +1764,65 @@ html.intro-on.intro-leaving .app { visibility: visible; }
   .in-note:nth-child(n+7) { display: none; }
   .intro { transition: opacity .3s; } .intro.out { transform: none; filter: none; }
 }
+/* v50: compact lists that open on request, and a calmer page */
+@keyframes v50In { from { opacity: 0; transform: translateY(6px); } }
+.more-t { flex: none; align-self: center; height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--foreground); font: 600 12px var(--font-sans); letter-spacing: 0; cursor: pointer; transition: background .2s var(--ease), border-color .2s var(--ease), color .2s; }
+.more-t:hover { background: var(--muted); border-color: color-mix(in srgb, var(--c, var(--accent)) 45%, var(--border)); }
+.more-t:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* the ingredient list: each family is one compact row; Show all opens it into a grid */
+.list.ing .cat { padding: 12px 0 0; }
+.list.ing .cat-h { align-items: center; }
+.list.ing .cat-h p { display: none; }
+.list.ing .cat.open .cat-h p { display: block; animation: v50In .35s var(--ease) both; }
+.list.ing .cat-nav { align-items: center; gap: 2px; }
+.list.ing .rail { grid-auto-columns: 96px; gap: 8px; padding: 8px 16px 14px; scroll-padding: 0 16px; }
+.list.ing .card { padding: 4px 4px 7px; gap: 1px; border-radius: 11px; }
+.list.ing .card .thumb { border-radius: 8px; }
+.list.ing .card-n { font-size: 12.5px; padding: 4px 2px 0; }
+.list.ing .card-s { font-size: 10.5px; padding: 0 2px; }
+.list.ing .card-s .mono { font-size: 10px; }
+.list.ing .cat.open .rail { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); overflow: visible; scroll-snap-type: none; }
+.list.ing .cat.open [data-scroll] { display: none; }
+@media (max-width: 640px) { .list.ing [data-scroll] { display: none; } .list.ing .rail { grid-auto-columns: 92px; } }
+/* an ingredient's perfumes: a few per tier until Show all */
+.pyramid.used.clip .badge.more { display: none; }
+.pyramid.used:not(.clip) .more-n { display: none; }
+.more-n { cursor: pointer; font-weight: 600; border-style: dashed; color: var(--muted-foreground); background: transparent; }
+.more-n:hover { color: var(--foreground); border-color: var(--accent); }
+/* a perfume's blend card folds to its heading and progress */
+details.lab-card > summary { list-style: none; display: grid; gap: 10px; cursor: pointer; }
+details.lab-card > summary::-webkit-details-marker { display: none; }
+details.lab-card .lab-h { justify-content: flex-start; align-items: center; }
+details.lab-card .lab-h .mono { margin-left: auto; }
+.lab-chev { width: 16px; height: 16px; flex: none; margin-left: 4px; color: var(--muted-foreground); transition: transform .35s var(--ease); }
+details.lab-card[open] .lab-chev { transform: rotate(180deg); }
+details.lab-card[open] > :not(summary) { animation: v50In .35s var(--ease) both; }
+details.lab-card:not([open]):hover { border-color: color-mix(in srgb, var(--c) 50%, var(--border)); }
+/* the globe's family chips: one quiet row that scrolls, fading at its end, never a second line */
+.overlay-bl { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); padding-right: 24px; }
+.overlay-bl::-webkit-scrollbar { display: none; }
+.overlay-bl .chip { flex: none; }
+
+/* theme wash: the new theme is revealed by a growing circle instead of the default cross-fade */
+html.theme-wash::view-transition-old(root),html.theme-wash::view-transition-new(root){animation:none;mix-blend-mode:normal}
+html.theme-wash::view-transition-new(root){z-index:2}
+
+/* tabs: one pill slides between Ingredients and Fragrances */
+.tabs::before { content: ''; position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 4px); border-radius: 7px; background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.08), 0 0 0 .5px rgba(0,0,0,.04); transition: transform .42s cubic-bezier(.3,.8,.2,1), opacity .2s; }
+.panel[data-tab="frag"] .tabs::before { transform: translateX(calc(100% + 2px)); }
+.panel[data-tab="col"] .tabs::before { opacity: 0; }
+.tabs .tab { position: relative; z-index: 1; }
+.tabs .tab[aria-selected="true"] { background: transparent; box-shadow: none; }
+/* list and page slide past each other: the outgoing view fades quickly, the incoming one settles in */
+.view { transition: transform .5s cubic-bezier(.2,.8,.2,1), opacity .32s cubic-bezier(.3,0,.2,1), visibility 0s; }
+.view.off-right { transform: translateX(32px); }
+.view.off-left { transform: translateX(-32px) scale(.985); }
+.view.off-right, .view.off-left { transition-duration: .3s, .2s, 0s; visibility: hidden; transition-delay: 0s, 0s, .3s; }
+/* the folded lab card opens smoothly where the browser can animate to auto height */
+details.lab-card { interpolate-size: allow-keywords; }
+details.lab-card::details-content { height: 0; overflow: clip; transition: height .42s cubic-bezier(.3,.8,.2,1), content-visibility .42s allow-discrete; }
+details.lab-card[open]::details-content { height: auto; }
+@media (prefers-reduced-motion: reduce) { .tabs::before, .view, details.lab-card::details-content { transition: none; } }
 </style>
 
 <div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="in-word">

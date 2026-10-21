@@ -72,7 +72,21 @@ function placeThemePill() {
   if (!b.offsetWidth) b = themeSeg.querySelector(`[data-theme-v="${matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'}"]`);
   themePill.style.width = b.offsetWidth + 'px'; themePill.style.transform = `translateX(${b.offsetLeft - 3}px)`;
 }
-themeSeg.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setTheme(b.dataset.themeV); });
+// a theme change washes over the page as a circle growing from the button that was pressed
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+themeSeg.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  const was = isDark(), v = b.dataset.themeV;
+  const flips = v === 'auto' ? matchMedia('(prefers-color-scheme: dark)').matches !== was : (v === 'dark') !== was;
+  if (!flips || !document.startViewTransition || calm()) return setTheme(v);
+  const r = b.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const far = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  root.classList.add('theme-wash');
+  const t = document.startViewTransition(() => setTheme(v));
+  t.ready.then(() => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${far}px at ${x}px ${y}px)`] },
+    { duration: 560, easing: 'cubic-bezier(.3,.7,.2,1)', pseudoElement: '::view-transition-new(root)' })).catch(() => {});
+  t.finished.finally(() => root.classList.remove('theme-wash'));
+});
 let savedTheme = 'auto'; try { savedTheme = localStorage.getItem('noteguessr:theme') || 'auto'; } catch {}
 setTheme(['light', 'dark', 'auto'].includes(savedTheme) ? savedTheme : 'auto', false);
 new ResizeObserver(placeThemePill).observe(themeSeg);
@@ -243,6 +257,7 @@ function wantLabel(ing) {
   if (spot) return ing.family === spot && (performance.now() - spotAt) > (spotDelay[ing.id] || 0) + 200;
   return view.scale > 1.9 || (view.scale > 1.45 && USES[ing.id].length >= 20);
 }
+let overlayAt = -1e9, overlayBoxes = [];
 const BY_USE = INGREDIENTS.slice().sort((a, b) => USES[b.id].length - USES[a.id].length);
 function drawOverlay() {
   if (play.active) {
@@ -250,7 +265,17 @@ function drawOverlay() {
     pinEl?.classList.add('hidden');
     play.draw?.(); return;
   }
-  const placed = [];
+  // the stage's own controls (family chips, zoom, regions) count as taken space, so no label hides under them
+  // (measured a few times a second, not every frame)
+  if (performance.now() - overlayAt > 400) {
+    overlayAt = performance.now();
+    const sr = stage.getBoundingClientRect();
+    overlayBoxes = [...stage.querySelectorAll('.overlay-bl, .overlay-br, .overlay-tr')].map((o) => o.getBoundingClientRect()).filter((r) => r.width)
+      .map((r) => [r.left - sr.left - 4, r.top - sr.top - 4, r.right - sr.left + 4, r.bottom - sr.top + 4]);
+  }
+  const placed = overlayBoxes.slice(), fixed = placed.length;
+  // a calm map: at most about one label per 30,000 px² of globe, busiest notes first
+  const room = Math.max(6, Math.round((W * H) / 30000));
   const order = sel.ing ? [sel.ing, ...BY_USE.filter((i) => i !== sel.ing)] : BY_USE;
   for (const ing of order) {
     const want = wantLabel(ing);
@@ -264,9 +289,13 @@ function drawOverlay() {
     const p = project(ing.loc);
     el.style.transform = `translate(${p.x}px, ${p.y - 8}px) translate(-50%, -100%)`;
     // greedy collision culling: busier ingredients claim space first
-    const bw = el._w || (el._w = el.offsetWidth || ing.name.length * 7 + 24), box = [p.x - bw / 2, p.y - 30, p.x + bw / 2, p.y - 6];
+    // (measured once it has been on screen, so the boxes fit the real label at any text size, with a little air)
+    if (!el._m && el.offsetWidth) { el._w = el.offsetWidth; el._h = el.offsetHeight; el._m = true; }
+    const bw = (el._w || ing.name.length * 7 + 24) + 18, bh = el._h || 24, box = [p.x - bw / 2, p.y - 8 - bh - 12, p.x + bw / 2, p.y + 6];
     const clash = placed.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
-    const show = p.front && p.x > -50 && p.x < W + 50 && p.y > -20 && p.y < H + 40 && !clash;
+    // only whole labels: one that would be cut by the stage's edge waits until it fits (the chosen note always shows)
+    const inside = box[0] > 4 && box[2] < W - 4 && box[1] > 4 && p.y < H - 4;
+    const show = p.front && (inside || sel.ing === ing) && !clash && (placed.length - fixed < room || sel.ing === ing);
     if (show) placed.push(box);
     el.classList.toggle('hidden', !show);
   }
@@ -640,6 +669,19 @@ const chevron = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColo
 let groups = []; // [{key, label, color, count}] for the category bar
 let spyRaf = 0;
 const queueSpy = () => { if (!spyRaf) spyRaf = requestAnimationFrame(() => { spyRaf = 0; spy(); }); };
+// families in the ingredient list sit in one compact row each until opened into a grid (remembered per browser)
+const openFams = (() => { try { return new Set(JSON.parse(localStorage.getItem('fraguessr:open-families')) || []); } catch { return new Set(); } })();
+function toggleFam(cat, fam) {
+  const open = !openFams.has(fam);
+  if (open) openFams.add(fam); else openFams.delete(fam);
+  try { localStorage.setItem('fraguessr:open-families', JSON.stringify([...openFams])); } catch {}
+  const rail = cat.querySelector('.rail'), b = cat.querySelector('[data-fam-more]');
+  cat.classList.toggle('open', open); rail.scrollLeft = 0;
+  if (b) { b.textContent = open ? 'Hide' : 'Show all'; b.setAttribute('aria-expanded', String(open)); }
+  observeThumbs();
+  if (open) cascade([...rail.querySelectorAll('.card')].slice(3, 60), { cls: 'mv-pop', step: 14 });
+  else if (cat.getBoundingClientRect().top < listEl.getBoundingClientRect().top) cat.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' });
+}
 function renderList(animate) {
   const q = filterEl.value.trim().toLowerCase();
   let html = ''; groups = [];
@@ -650,9 +692,10 @@ function renderList(animate) {
       const items = INGREDIENTS.filter((i) => i.family === fam && (!q || (i.name + ' ' + i.country + ' ' + i.place + ' ' + i.latin).toLowerCase().includes(q)));
       if (!items.length) continue;
       groups.push({ key: fam, label: f.label, color: famHex(fam), count: items.length });
-      html += `<section class="cat" id="cat-${fam}" data-group="${fam}" style="--c:${famHex(fam)}">
+      const open = openFams.has(fam) || (q && items.length <= 12);
+      html += `<section class="cat${open ? ' open' : ''}" id="cat-${fam}" data-group="${fam}" style="--c:${famHex(fam)}">
         <div class="cat-h"><div><div class="cat-t"><span class="dot"></span>${f.label}<span class="mono muted">${items.length}</span></div><p>${FAMILY_INFO[fam]}</p></div>
-          <div class="cat-nav"><button class="btn icon ghost sm" data-scroll="-1" aria-label="Scroll ${f.label} left">${chevron('l')}</button><button class="btn icon ghost sm" data-scroll="1" aria-label="Scroll ${f.label} right">${chevron('r')}</button></div></div>
+          <div class="cat-nav"><button class="btn icon ghost sm" data-scroll="-1" aria-label="Scroll ${f.label} left">${chevron('l')}</button><button class="btn icon ghost sm" data-scroll="1" aria-label="Scroll ${f.label} right">${chevron('r')}</button>${items.length > 3 ? `<button class="more-t" data-fam-more="${fam}" aria-expanded="${open}">${open ? 'Hide' : 'Show all'}</button>` : ''}</div></div>
         <div class="rail" tabindex="-1">${items.map((i) => `<button class="card${sel.ing === i ? ' active' : ''}" data-ing="${i.id}" style="--c:${ingHex(i)};--c2:${i.c[1]}" title="${esc(i.name)}, ${esc(i.country)}">
           <span class="thumb" data-thumb="i:${i.id}"><span class="ph" style="background:radial-gradient(circle at 40% 35%, ${i.c[1]}, ${i.c[0]} 55%, ${i.c[2]})"></span></span>
           <span class="card-n">${esc(i.name)}</span><span class="card-s">${esc(i.country)}<span class="mono">${USES[i.id].length}</span></span></button>`).join('')}</div>
@@ -777,15 +820,18 @@ function labRow({ f, r, n }) {
 // a fragrance's page: the formula against your shelf, and the button that blends it
 function labCard(f) {
   const r = readiness(f), n = lab.made[f.id] || 0; if (!r.ids.length) return '';
-  return `<div class="lab-card${r.ready ? ' ready' : ''}" id="lab-card" style="--c:${fragHex(f)}">
-    <div class="lab-h"><b>Blend it yourself</b><span class="mono">${r.have} / ${r.all} drops</span></div>
-    <span class="lrow-bar"><i style="--p:${Math.max(r.have ? 3 : 0, Math.round(100 * r.have / r.all))}%"></i></span>
+  // folded to its heading and progress until opened (open already once it's ready to blend)
+  return `<details class="lab-card${r.ready ? ' ready' : ''}" id="lab-card" style="--c:${fragHex(f)}"${r.ready || labOpen ? ' open' : ''}>
+    <summary><span class="lab-h"><b>Blend it yourself</b><span class="mono">${r.have} / ${r.all} drops</span><svg class="lab-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></span>
+    <span class="lrow-bar"><i style="--p:${Math.max(r.have ? 3 : 0, Math.round(100 * r.have / r.all))}%"></i></span></summary>
     <div class="lab-notes">${r.ids.map((id) => { const e = essence(id), need = r.need[id]; return `<button class="lab-n${e >= need ? ' ok' : ''}" data-ing="${id}" style="--c:${ingHex(ING[id])}" title="${esc(ING[id].name)}: ${Math.min(e, need)} of ${need} drops"><span class="dot"></span>${esc(ING[id].name)}<span class="mono">${Math.min(e, need)}/${need}</span></button>`; }).join('')}</div>
     <div class="lab-f"><span class="muted">${r.ready ? `Blending spends ${r.all} drops from your shelf.` : n ? `You have blended this ${n}×. Collect ${r.all - r.have} more drops to blend it again.` : `Collect ${r.all - r.have} more drops: name these notes in upcoming daily scents.`}</span>
     <button class="btn ${r.ready ? 'primary' : ''}" data-blend="${f.id}" ${r.ready ? '' : 'disabled'}>${DROP}${r.ready ? 'Blend it' : 'Not ready'}</button></div>
     ${n ? `<span class="lab-made">Blended ${n}×</span>` : ''}
-  </div>`;
+  </details>`;
 }
+let labOpen = false; // the reader opened a blend card: keep the next ones open too
+document.addEventListener('toggle', (e) => { if (e.target.id === 'lab-card') labOpen = e.target.open; }, true);
 function doBlend(id) {
   const f = FRAG[id]; if (!f || !blend(f)) return;
   if (sel.frag !== f) selectFragrance(id);
@@ -847,7 +893,7 @@ if (new URLSearchParams(location.search).has('prerender')) {
   const keys = new URLSearchParams(location.search).get('prerender') || '';
   // `only` (a list of ids) limits the run to those, for adding new entries without redoing the rest
   window.prerenderThumbs = (only) => getModels().then((m) => Promise.all([
-    ...(keys.includes('i') ? INGREDIENTS.map((i) => m.thumbnail(`i:${i.id}`, m.thumbBuilders.ingredient(i))) : []),
+    ...(keys.includes('i') ? INGREDIENTS.filter((i) => !only || only.includes(i.id)).map((i) => m.thumbnail(`i:${i.id}`, m.thumbBuilders.ingredient(i))) : []),
     ...(keys.includes('f') ? FRAGRANCES.filter((f) => !only || only.includes(f.id)).map((f) => m.thumbnail(`f:${f.id}:${isDark() ? 'd' : 'l'}`, m.thumbBuilders.fragrance(f, liquidFor(f), fragHex(f)), sweepFor(fragHex(f)))) : []),
     // the daily bottles, larger and on a clear background so they sit on either theme
     ...(keys.includes('h') ? [import('./game.js').then((g) => Promise.all(g.scentPoolIds().map((id) => m.thumbnail(`h:${id}`, m.thumbBuilders.fragrance(FRAG[id], liquidFor(FRAG[id]), fragHex(FRAG[id])), null, { size: 480 }))))] : []),
@@ -892,6 +938,8 @@ listEl.addEventListener('click', (e) => {
   if (e.target.closest('[data-act="col-play"]')) { startPlay(); return; }
   const fr = e.target.closest('.crow'); if (fr) { selectIngredient(fr.dataset.ing, { fact: fr.dataset.fr }); return; }
   const mf = e.target.closest('[data-mile-fact]'); if (mf) { const [id, r] = mf.dataset.mileFact.split(':'); selectIngredient(id, { fact: r }); return; }
+  const more = e.target.closest('[data-fam-more]');
+  if (more) { toggleFam(more.closest('.cat'), more.dataset.famMore); return; }
   const sc = e.target.closest('[data-scroll]');
   if (sc) { const rail = sc.closest('.cat').querySelector('.rail'); rail.scrollBy({ left: +sc.dataset.scroll * rail.clientWidth * 0.8, behavior: reduceMotion ? 'auto' : 'smooth' }); return; }
   const r = e.target.closest('.row, .card, .ctile[data-ing], .lrow-main, .lab-e'); if (!r) return;
@@ -935,12 +983,12 @@ function describeFragrance(f) {
   const by = f.perfumer === f.house ? `${f.house}'s in-house team` : f.perfumer.split(', ').length > 2 ? `a team of perfumers led by ${f.perfumer.split(', ')[0]}` : listText(f.perfumer.split(', '));
   const t3 = (t) => listText(f.tiers[t].slice(0, 3));
   const countries = [...new Set(f.ingredients.map((id) => ING[id].country))];
-  const accords = f.ingredients.filter((id) => ING[id].accord).length;
+  const accords = f.ingredients.filter((id) => ING[id].accord || ING[id].molecule).length;
   let text = `${f.name} is ${/^[aeiou]/.test(genre) ? 'an' : 'a'} ${genre} fragrance ${who}, composed by ${by} for ${f.house} in ${f.year}. `;
   if (f.tiers.top.join() === f.tiers.base.join()) text += `It is built around a single note, ${f.tiers.top[0]}, which stays the same from first spray to drydown. `;
   else text += `It opens with ${t3('top')}, moves into a heart of ${t3('heart')}, and settles on ${t3('base')}. `;
   if (countries.length) text += `Its mapped ingredients trace back to ${countries.length} ${countries.length === 1 ? 'country' : 'countries'}${countries.length > 1 ? `, from ${countries[0]} to ${countries[countries.length - 1]}` : ''}`;
-  text += accords ? `, and ${accords} of them ${accords === 1 ? 'is a lab-built accord' : 'are lab-built accords'} rather than natural extracts.` : '.';
+  text += accords ? `, and ${accords} of them ${accords === 1 ? 'is' : 'are'} made in the lab rather than taken from nature.` : '.';
   return { genre, text };
 }
 
@@ -1002,6 +1050,16 @@ function setTint(hex, palette) {
   root.style.setProperty('--tint-3', `rgba(${p3},0.08)`);
   tintRgb = [r / 255, g / 255, b / 255];
 }
+const USED_PEEK = 6, FRAG_AT = Object.fromEntries(FRAGRANCES.map((f, k) => [f.id, k]));
+// open or close a clipped list (an ingredient's perfumes): the extra items rise in, in turn
+function setUsed(box, open) {
+  if (!box) return;
+  box.classList.toggle('clip', !open);
+  const t = box.previousElementSibling?.querySelector('[data-used="toggle"]');
+  if (t) { t.textContent = open ? 'Hide' : 'Show all'; t.setAttribute('aria-expanded', String(open)); }
+  if (open) cascade([...box.querySelectorAll('.badge.more')].slice(0, 40), { cls: 'mv-pop', step: 12 });
+  else box.previousElementSibling?.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+}
 function selectIngredient(id, { fly = true, fact } = {}) {
   const ing = ING[id]; if (!ing) return;
   stopTour();
@@ -1010,7 +1068,9 @@ function selectIngredient(id, { fly = true, fact } = {}) {
   if (fly) flyTo(ing.loc, Math.max(view.tScale, 2.1));
   const uses = USES[id];
   const by = { top: [], heart: [], base: [] }; uses.forEach((u) => by[u.tier].push(u.f));
-  const usedList = (t) => by[t].length ? `<div class="tier"><span class="k">${TIER_LABEL[t]}</span><div class="notes">${by[t].sort((a, b) => a.name.localeCompare(b.name)).map((f) => `<button class="badge note" data-frag="${f.id}">${esc(f.name)} <span class="mono muted">${esc(f.house)}</span></button>`).join('')}</div></div>` : '';
+  // the best-known first (the atlas lists classics first), a few per tier until the list is opened
+  const usedList = (t) => by[t].length ? `<div class="tier"><span class="k">${TIER_LABEL[t]}</span><div class="notes">${by[t].sort((a, b) => FRAG_AT[a.id] - FRAG_AT[b.id]).map((f, k) => `<button class="badge note${k >= USED_PEEK ? ' more' : ''}" data-frag="${f.id}">${esc(f.name)} <span class="mono muted">${esc(f.house)}</span></button>`).join('')}${by[t].length > USED_PEEK ? `<button class="badge more-n" data-used="open">+${by[t].length - USED_PEEK}</button>` : ''}</div></div>` : '';
+  const longUsed = ['top', 'heart', 'base'].some((t) => by[t].length > USED_PEEK);
   const fam = FAMILIES[ing.family];
   topDetail();
   detailEl.innerHTML = `
@@ -1021,9 +1081,9 @@ function selectIngredient(id, { fly = true, fact } = {}) {
         <span class="badge glass tag mono">${esc(ing.place)}</span><span class="badge glass tag2 mono">Drag to turn</span></div>
       <div class="body">
         <div><h2 class="title">${esc(ing.name)}</h2><div class="latin">${esc(ing.latin)}</div></div>
-        <div class="badges"><span class="badge"><span class="dot" style="background:${famHex(ing.family)}"></span>${fam.label}</span><span class="badge soft">${esc(ing.country)}</span><span class="badge palette" title="Color palette">${ing.c.map((c) => `<span class="dot" style="background:${c};box-shadow:0 0 0 1px rgba(0,0,0,.12)"></span>`).join('')}</span>${ing.accord ? '<span class="badge accent">Accord in perfume</span>' : '<span class="badge soft">Natural extract</span>'}</div>
+        <div class="badges"><span class="badge"><span class="dot" style="background:${famHex(ing.family)}"></span>${fam.label}</span><span class="badge soft">${esc(ing.country)}</span><span class="badge palette" title="Color palette">${ing.c.map((c) => `<span class="dot" style="background:${c};box-shadow:0 0 0 1px rgba(0,0,0,.12)"></span>`).join('')}</span>${ing.molecule ? '<span class="badge accent">Aroma molecule</span>' : ing.accord ? '<span class="badge accent">Accord in perfume</span>' : '<span class="badge soft">Natural extract</span>'}</div>
         <p class="prose">${esc(ing.about)}</p>
-        ${ing.accord ? `<div class="callout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg><span>Perfumers rebuild this note from aroma molecules. The pin marks where the plant or material comes from.</span></div>` : ''}
+        ${ing.accord ? `<div class="callout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg><span>Perfumers rebuild this note from aroma molecules. The pin marks where the plant or material comes from.</span></div>` : ing.molecule ? `<div class="callout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg><span>A single molecule made in the lab, not taken from a plant. The pin marks where it was first made or made famous.</span></div>` : ''}
         <div class="facts">
           <div><span class="k">Origin</span><span class="v">${esc(ing.place)}</span></div>
           <div><span class="k">Part used</span><span class="v">${esc(ing.part)}</span></div>
@@ -1031,8 +1091,8 @@ function selectIngredient(id, { fly = true, fact } = {}) {
           <div><span class="k">Harvest</span><span class="v">${esc(ing.season)}</span></div>
         </div>
         ${FACTS[id] ? `<div class="fact-box"><div class="section-h"><span>Fun facts</span><span class="mono muted fact-count"></span></div><div class="fact-tiers" role="group" aria-label="Fun facts by rarity"></div><div class="fact-slot"></div></div>` : ''}
-        <div class="section-h"><span>Used in ${uses.length} fragrance${uses.length === 1 ? '' : 's'}</span><span class="mono muted">by note position</span></div>
-        <div class="pyramid">${usedList('top')}${usedList('heart')}${usedList('base')}</div>
+        <div class="section-h"><span>Used in ${uses.length} fragrance${uses.length === 1 ? '' : 's'}</span>${longUsed ? `<button class="more-t" data-used="toggle" aria-expanded="false">Show all</button>` : '<span class="mono muted">by note position</span>'}</div>
+        <div class="pyramid used${longUsed ? ' clip' : ''}">${usedList('top')}${usedList('heart')}${usedList('base')}</div>
       </div>
     </div>`;
   heroFor('ing', detailEl.querySelector('#hero'), { vig: ing, ing });
@@ -1098,11 +1158,11 @@ function selectFragrance(id) {
           <div class="stat"><div class="n">${new Set(f.ingredients.map((i) => ING[i].country)).size}</div><div class="k">countries</div></div>
           <div class="stat"><div class="n">${f.tiers.top.length + f.tiers.heart.length + f.tiers.base.length}</div><div class="k">listed notes</div></div>
         </div>
-        ${labCard(f)}
-        ${f.ingredients.length ? `<button class="btn" id="tour"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l14 8-14 8z"/></svg>Watch the notes travel to ${esc(f.house)}</button>` : ''}
         <div class="section-h"><span>Notes</span><span class="mono muted">tap a note to see its origin</span></div>
         <div class="pyramid">${['top', 'heart', 'base'].map((t) => `<div class="tier"><span class="k">${TIER_LABEL[t]}</span><div class="notes">${f.tiers[t].map(noteChip).join('')}</div></div>`).join('')}</div>
         ${far ? `<div class="callout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s7-6.3 7-12a7 7 0 1 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="10" r="2.5"/></svg><span>The farthest-travelled note is <b>${esc(far.name)}</b> from ${esc(far.place)}, ${esc(far.country)}, about ${Math.round(Math.max(...dists)).toLocaleString()} km from ${esc(f.house)}'s home city.${lead && lead !== far.id ? ` Its rarest mapped note in this atlas is <b>${esc(ING[lead].name)}</b>.` : ''}</span></div>` : ''}
+        ${f.ingredients.length ? `<button class="btn" id="tour"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4l14 8-14 8z"/></svg>Watch the notes travel to ${esc(f.house)}</button>` : ''}
+        ${labCard(f)}
       </div>
     </div>`;
   heroFor('frag', detailEl.querySelector('#hero'), { f, liquid });
@@ -1126,6 +1186,8 @@ function U3mean(pts) {
 }
 
 detailEl.addEventListener('click', (e) => {
+  const u = e.target.closest('[data-used]');
+  if (u) { const box = detailEl.querySelector('.pyramid.used'); setUsed(box, box.classList.contains('clip')); return; }
   if (e.target.closest('[data-back]')) { clearSelection(); showList(); return; }
   const bl = e.target.closest('[data-blend]'); if (bl) { doBlend(bl.dataset.blend); return; }
   const i = e.target.closest('[data-ing]'); if (i) { selectIngredient(i.dataset.ing); return; }
