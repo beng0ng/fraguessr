@@ -15,6 +15,7 @@ let fineDots = false;
 import { INGREDIENTS, FRAGRANCES, FAMILIES, HOUSES, noteId } from './data.js';
 import { createVignette } from './fx.js';
 import { createWorldLayer } from './world.js';
+import { createSky } from './sky.js';
 import { FACTS, LEGACY_TIER } from './facts.js';
 import { RARITY, RARITIES } from './rarity.js';
 import { letters, cascade, countUp, replay, burst } from './motion.js';
@@ -127,13 +128,13 @@ function refreshMarkers(force) {
 // drop to fewer pixels, a step at a time, judged on the median frame so one-off stalls don't count
 const QUALITY = [1, 0.75, 0.55];
 let qLevel = 0, qTimes = [], qFrom = performance.now() + 5000, globeDpr = 1;
-const renderDpr = () => Math.max(0.75, Math.min(devicePixelRatio || 1, 2) * QUALITY[qLevel]);
+const renderDpr = () => Math.max(0.75, Math.min(Math.max(devicePixelRatio || 1, 1.5), 2) * QUALITY[qLevel]); // 1× screens are drawn at 1.5× for smoother edges
 const globeSize = () => ({ width: W * renderDpr() / globeDpr, height: H * renderDpr() / globeDpr });
 function watchFrames(now, ms) {
   if (now < qFrom || document.hidden || qLevel >= QUALITY.length - 1) return;
   qTimes.push(ms); if (qTimes.length < 90) return;
   const median = qTimes.sort((a, b) => a - b)[45]; qTimes = [];
-  if (median > 26) { qLevel++; world.resize(); resizeDots(); globe?.update(globeSize()); qFrom = now + 2500; }
+  if (median > 26) { qLevel++; world.resize(); sky.resize(); resizeDots(); globe?.update(globeSize()); qFrom = now + 2500; }
 }
 async function initGlobe() {
   const createGlobe = await (cobeReady ||= loadCobe());
@@ -227,6 +228,7 @@ function tick(now) {
   globe.update(upd);
   $('#zoom-meter').textContent = view.scale.toFixed(1) + '×';
   drawOverlay();
+  sky.draw(now);
   world.draw(now, { shades: play.active ? null : shadeList() });
   drawDots(now);
   requestAnimationFrame(tick);
@@ -1597,7 +1599,8 @@ function shadeList() {
 }
 // ── cartographic layer (atmosphere, graticule, place names) ──
 const world = createWorldLayer($('#world'), { project, view, getSize: () => ({ W, H }), isDark, fit: () => fit, getDpr: renderDpr });
-world.resize(); resizeDots();
+const sky = createSky($('#sky'), { view, getSize: () => ({ W, H }), isDark, getDpr: renderDpr });
+world.resize(); sky.resize(); resizeDots();
 
 // ── Fraguessr game ─────────────────────────────────────
 let gamePromise = null;
@@ -1636,7 +1639,7 @@ $('#open-help').addEventListener('click', withGame((m) => m.openHelp()));
 $('#open-stats').addEventListener('click', withGame((m) => m.openStats()));
 
 // ── boot ───────────────────────────────────────────────
-new ResizeObserver(() => { size(); world.resize(); resizeDots(); globe?.update(globeSize()); }).observe(stage);
+new ResizeObserver(() => { size(); world.resize(); sky.resize(); resizeDots(); globe?.update(globeSize()); }).observe(stage);
 renderList(true);
 initGlobe();
 // the daily scent is the front door; a shared link to the atlas, an ingredient or a perfume opens the atlas

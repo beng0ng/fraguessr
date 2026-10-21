@@ -26,7 +26,7 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/cobe@2.0.1/dist/index.esm.js" as="fetch" crossorigin>
 <!-- every module the daily page needs, fetched in parallel instead of one import at a time -->
-<link rel="modulepreload" href="app.js"><link rel="modulepreload" href="data.js"><link rel="modulepreload" href="facts.js"><link rel="modulepreload" href="world.js"><link rel="modulepreload" href="fx.js"><link rel="modulepreload" href="rarity.js"><link rel="modulepreload" href="motion.js"><link rel="modulepreload" href="intro.js"><link rel="modulepreload" href="game.js"><link rel="modulepreload" href="stats.js"><link rel="modulepreload" href="borders.js">
+<link rel="modulepreload" href="app.js"><link rel="modulepreload" href="data.js"><link rel="modulepreload" href="facts.js"><link rel="modulepreload" href="world.js"><link rel="modulepreload" href="sky.js"><link rel="modulepreload" href="fx.js"><link rel="modulepreload" href="rarity.js"><link rel="modulepreload" href="motion.js"><link rel="modulepreload" href="intro.js"><link rel="modulepreload" href="game.js"><link rel="modulepreload" href="stats.js"><link rel="modulepreload" href="borders.js">
 <meta name="apple-mobile-web-app-title" content="Fraguessr">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Fraguessr","url":"https://fraguessr.com/","description":"A daily perfume guessing game: name the notes in today's fragrance, then pin where they grow on a 3D globe.","applicationCategory":"GameApplication","operatingSystem":"Any","browserRequirements":"Requires a modern web browser","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
 <title>Fraguessr: the daily perfume guessing game</title>
@@ -410,7 +410,7 @@ h2.title { margin: 0; font-family: var(--font-display); font-size: 31px; line-he
 
 
 /* ── cartographic layer ── */
-.world { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.world, .sky { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 
 /* ── Fraguessr game ── */
 .play-btn { gap: 6px; border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: color-mix(in srgb, var(--accent) 10%, var(--card)); color: var(--foreground); font-weight: 500; }
@@ -1605,6 +1605,7 @@ html.intro-on.intro-leaving .app { visibility: visible; }
 
   <main class="main">
     <section class="stage" id="stage" aria-label="Interactive globe">
+      <canvas class="sky" id="sky" aria-hidden="true"></canvas>
       <div class="globe-wrap" id="globe-wrap"><canvas id="globe"></canvas></div>
       <canvas class="world" id="world" aria-hidden="true"></canvas>
       <canvas class="world" id="dots" aria-hidden="true"></canvas>

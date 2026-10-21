@@ -65,7 +65,7 @@ function shadeSprite(rgb) {
 
 export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, getDpr = () => Math.min(devicePixelRatio || 1, 2) }) {
   const ctx = canvas.getContext('2d');
-  let dpr = 1, stars = [];
+  let dpr = 1;
   // coastlines and country borders: each point's unit vector is worked out once, then only rotated with the view each
   // frame. Every line also keeps a bounding cap (its centre and angular radius) so lines on the far side are skipped whole
   let borders = null, land = null, fineLand = null, fineLoading = false;
@@ -87,9 +87,6 @@ export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, 
   function resize() {
     const { W, H } = getSize(); dpr = getDpr();
     canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
-    // a fixed starfield, only visible in dark mode outside the globe
-    let s = 7; const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
-    stars = Array.from({ length: Math.round((W * H) / 2600) }, () => [r() * W, r() * H, r() * 1.1 + 0.2, r()]);
   }
   const lerp = (a, b, t) => a + (b - a) * t;
   function fade(z, [a, b]) { if (z < a - 0.25 || z > b + 0.35) return 0; return Math.min(1, (z - (a - 0.25)) / 0.25, (b + 0.35 - z) / 0.35); }
@@ -99,16 +96,6 @@ export function createWorldLayer(canvas, { project, view, getSize, isDark, fit, 
     const dark = isDark(), z = view.scale, S = view.scale * fit();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
     const cx = W / 2, cy = H / 2, R = 0.8 * S * H / 2;
-    // stars (dark) twinkle slowly and drift with the spin
-    if (dark) {
-      const off = ((view.phi * 40) % W + W) % W;
-      for (const [x, y, s, p] of stars) {
-        const xx = (x + off) % W, d = Math.hypot(xx - cx, y - cy); if (d < R * 1.04) continue;
-        ctx.globalAlpha = (0.25 + 0.35 * Math.sin(t / 900 + p * 40) ** 2) * Math.min(1, (d - R) / 60);
-        ctx.fillStyle = '#fff'; ctx.fillRect(xx, y, s, s);
-      }
-      ctx.globalAlpha = 1;
-    }
     // atmosphere: a thin lit rim that fades outward
     const g = ctx.createRadialGradient(cx, cy, R * 0.94, cx, cy, R * 1.16);
     const rim = dark ? '214,168,118' : '196,150,104';

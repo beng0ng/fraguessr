@@ -1379,7 +1379,7 @@ export function createModelStage() {
   const canvas = document.createElement('canvas'); canvas.className = 'bottle-canvas';
   let renderer;
   try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, powerPreference: 'high-performance' }); } catch { return null; }
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+  renderer.setPixelRatio(Math.min(Math.max(devicePixelRatio || 1, 1.5), 2));
   renderer.toneMapping = THREE.NeutralToneMapping; renderer.toneMappingExposure = 1.1;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.VSMShadowMap;
   const { scene, backdrop } = buildScene(renderer);
@@ -1462,6 +1462,8 @@ export function createModelStage() {
 
 // small offscreen renderer for list thumbnails (queued, one per idle slot)
 let thumbR = null, thumbScene = null, thumbCam = null, thumbBack = null;
+// list pictures are drawn at three times the cards' 114px so they stay sharp on high-density phones
+const THUMB = 352;
 const thumbCache = new Map(), queue = [];
 let pumping = false;
 function pump() {
@@ -1474,7 +1476,7 @@ function pump() {
       if (!thumbR) {
         const c = document.createElement('canvas');
         thumbR = new THREE.WebGLRenderer({ canvas: c, antialias: true, alpha: true, preserveDrawingBuffer: true });
-        thumbR.setPixelRatio(1); thumbR.setSize(176, 176, false);
+        thumbR.setPixelRatio(1); thumbR.setSize(THUMB, THUMB, false);
         thumbR.toneMapping = THREE.NeutralToneMapping; thumbR.toneMappingExposure = 1.15;
         thumbR.shadowMap.enabled = true; thumbR.shadowMap.type = THREE.PCFSoftShadowMap;
         ({ scene: thumbScene, backdrop: thumbBack } = buildScene(thumbR)); thumbScene.traverse((o) => { if (o.material?.isShadowMaterial) o.material.opacity = 0.14; }); thumbCam = new THREE.PerspectiveCamera(24, 1, 0.05, 80);
@@ -1484,7 +1486,7 @@ function pump() {
       if (job.size) thumbR.setSize(job.size, job.size, false);
       thumbR.render(thumbScene, thumbCam);
       const url = thumbR.domElement.toDataURL(job.sweep ? 'image/jpeg' : 'image/png', 0.9);
-      if (job.size) thumbR.setSize(176, 176, false);
+      if (job.size) thumbR.setSize(THUMB, THUMB, false);
       thumbScene.remove(obj); dispose(obj);
       thumbCache.set(job.key, url); job.done(url);
     }
