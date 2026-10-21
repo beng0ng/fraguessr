@@ -12,18 +12,108 @@ const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
 function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 function h3(x, y, z) { const v = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453; return v - Math.floor(v); }
+// lattice values are memoised in a small direct-mapped table: neighbouring samples share corners, so most lookups skip the sine
+const HN = 1 << 16, hX = new Int32Array(HN), hY = new Int32Array(HN), hZ = new Int32Array(HN), hV = new Float64Array(HN).fill(-1);
+function hc(x, y, z) {
+  const k = (Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^ Math.imul(z, 83492791)) & (HN - 1);
+  if (hV[k] >= 0 && hX[k] === x && hY[k] === y && hZ[k] === z) return hV[k];
+  hX[k] = x; hY[k] = y; hZ[k] = z; return (hV[k] = h3(x, y, z));
+}
+// a second small table keeps whole cells (their eight corners), since runs of samples fall in the same cell
+const CN = 256, cX = new Int32Array(CN), cY = new Int32Array(CN), cZ = new Int32Array(CN), cOk = new Uint8Array(CN), cV = new Float64Array(CN * 8);
 function noise3(x, y, z) {
   const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z), xf = x - xi, yf = y - yi, zf = z - zi;
   const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf), w = zf * zf * (3 - 2 * zf);
+  const X = xi | 0, Y = yi | 0, Z = zi | 0;
+  if (X !== xi || Y !== yi || Z !== zi) return noise3slow(xi, yi, zi, u, v, w);
+  const k = (Math.imul(X, 73856093) ^ Math.imul(Y, 19349663) ^ Math.imul(Z, 83492791)) & (CN - 1), o = k * 8;
+  if (!cOk[k] || cX[k] !== X || cY[k] !== Y || cZ[k] !== Z) {
+    cOk[k] = 1; cX[k] = X; cY[k] = Y; cZ[k] = Z;
+    cV[o] = hc(X, Y, Z); cV[o + 1] = hc(X + 1, Y, Z); cV[o + 2] = hc(X, Y + 1, Z); cV[o + 3] = hc(X + 1, Y + 1, Z);
+    cV[o + 4] = hc(X, Y, Z + 1); cV[o + 5] = hc(X + 1, Y, Z + 1); cV[o + 6] = hc(X, Y + 1, Z + 1); cV[o + 7] = hc(X + 1, Y + 1, Z + 1);
+  }
+  const a0 = cV[o], a1 = cV[o + 1], b0 = cV[o + 2], b1 = cV[o + 3], c0 = cV[o + 4], c1 = cV[o + 5], d0 = cV[o + 6], d1 = cV[o + 7];
+  const p = a0 + (a1 - a0) * u, q = b0 + (b1 - b0) * u, r = c0 + (c1 - c0) * u, s = d0 + (d1 - d0) * u;
+  const lo = p + (q - p) * v, hi = r + (s - r) * v;
+  return lo + (hi - lo) * w;
+}
+function noise3slow(xi, yi, zi, u, v, w) {
   const L = (a, b, t) => a + (b - a) * t;
   return L(L(L(h3(xi, yi, zi), h3(xi + 1, yi, zi), u), L(h3(xi, yi + 1, zi), h3(xi + 1, yi + 1, zi), u), v),
            L(L(h3(xi, yi, zi + 1), h3(xi + 1, yi, zi + 1), u), L(h3(xi, yi + 1, zi + 1), h3(xi + 1, yi + 1, zi + 1), u), v), w);
 }
 function fbm(x, y, z, oct = 3) { let s = 0, a = 0.5, f = 1; for (let i = 0; i < oct; i++) { s += a * noise3(x * f, y * f, z * f); a *= 0.5; f *= 2.03; } return s; }
+// fbm over a w×h grid at a fixed depth z, for canvas textures: the same noise as fbm(), but the lattice hash's sine is
+// split as sin(a + b) = sin a·cos b + cos a·sin b, so each lattice column and row pays for its sines once instead of every pixel
+function fbmImage(w, h, scale, z, oct) {
+  const out = new Float64Array(w * h), xi = new Int32Array(w), xu = new Float64Array(w);
+  let amp = 0.5, f = 1;
+  for (let o = 0; o < oct; o++) {
+    let x0 = 2147483647, x1 = -2147483648;
+    for (let px = 0; px < w; px++) { const x = (px / w) * scale * f, i = Math.floor(x), t = x - i; xi[px] = i; xu[px] = t * t * (3 - 2 * t); if (i < x0) x0 = i; if (i + 1 > x1) x1 = i + 1; }
+    const nx = x1 - x0 + 1, sx = new Float64Array(nx), cx = new Float64Array(nx);
+    for (let j = 0; j < nx; j++) { const a = (x0 + j) * 127.1; sx[j] = Math.sin(a); cx[j] = Math.cos(a); }
+    const zz = z * f, zi = Math.floor(zz), zt = zz - zi, ww = zt * zt * (3 - 2 * zt);
+    const r00 = new Float64Array(nx), r10 = new Float64Array(nx), r01 = new Float64Array(nx), r11 = new Float64Array(nx);
+    let lastY = NaN;
+    for (let py = 0; py < h; py++) {
+      const y = (py / h) * scale * f, yi = Math.floor(y), t = y - yi, v = t * t * (3 - 2 * t);
+      if (yi !== lastY) {
+        lastY = yi;
+        // lattice values along this row for the four (y, z) corners
+        const rows = [[r00, yi, zi], [r10, yi + 1, zi], [r01, yi, zi + 1], [r11, yi + 1, zi + 1]];
+        for (const [r, Y, Z] of rows) {
+          const b = Y * 311.7 + Z * 74.7, sb = Math.sin(b), cb = Math.cos(b);
+          for (let j = 0; j < nx; j++) { const q = (sx[j] * cb + cx[j] * sb) * 43758.5453; r[j] = q - Math.floor(q); }
+        }
+      }
+      const row = py * w;
+      for (let px = 0; px < w; px++) {
+        const j = xi[px] - x0, u = xu[px];
+        const p = r00[j] + (r00[j + 1] - r00[j]) * u, q = r10[j] + (r10[j + 1] - r10[j]) * u, r = r01[j] + (r01[j + 1] - r01[j]) * u, s = r11[j] + (r11[j + 1] - r11[j]) * u;
+        const lo = p + (q - p) * v, hi = r + (s - r) * v;
+        out[row + px] += amp * (lo + (hi - lo) * ww);
+      }
+    }
+    amp *= 0.5; f *= 2.03;
+  }
+  return out;
+}
+
+// three's mergeVertices, keyed by numbers in an open-addressed table instead of strings: same tolerance, same vertex order
+function weld(geo) {
+  const names = Object.keys(geo.attributes), attrs = names.map((n) => geo.attributes[n]);
+  if (attrs.some((a) => a.isInterleavedBufferAttribute || a.normalized) || Object.keys(geo.morphAttributes).length) return mergeVertices(geo);
+  const idx = geo.getIndex(), n = idx ? idx.count : geo.attributes.position.count, width = attrs.reduce((s, a) => s + a.itemSize, 0);
+  const tol = 1e-4, mul = Math.pow(10, Math.log10(1 / tol)), add = tol * 0.5 * mul;
+  let size = 16; while (size < n * 2) size <<= 1;
+  const mask = size - 1, table = new Int32Array(size).fill(-1), keys = new Int32Array(n * width), key = new Int32Array(width);
+  const out = attrs.map((a) => new a.array.constructor(a.count * a.itemSize)), newIndices = [];
+  let next = 0;
+  for (let i = 0; i < n; i++) {
+    const v = idx ? idx.getX(i) : i; let h = 0, o = 0;
+    for (const a of attrs) { const s = a.itemSize, arr = a.array; for (let k = 0; k < s; k++) { const q = ~~(arr[v * s + k] * mul + add); key[o++] = q; h = Math.imul(h ^ q, 16777619); } }
+    let slot = (h ^ (h >>> 15)) & mask, hit = -1;
+    while (table[slot] !== -1) {
+      const c = table[slot], b = c * width; let same = true;
+      for (let k = 0; k < width; k++) if (keys[b + k] !== key[k]) { same = false; break; }
+      if (same) { hit = c; break; }
+      slot = (slot + 1) & mask;
+    }
+    if (hit >= 0) { newIndices.push(hit); continue; }
+    table[slot] = next; keys.set(key, next * width);
+    attrs.forEach((a, j) => { const s = a.itemSize; for (let k = 0; k < s; k++) out[j][next * s + k] = a.array[v * s + k]; });
+    newIndices.push(next++);
+  }
+  const res = geo.clone();
+  attrs.forEach((a, j) => res.setAttribute(names[j], new a.constructor(out[j].slice(0, next * a.itemSize), a.itemSize, a.normalized)));
+  res.setIndex(newIndices);
+  return res;
+}
 
 // displace along normals with fbm; geometry should be smooth/indexed
 function displace(geo, amp, freq, oct = 3, seed = 0) {
-  geo = mergeVertices(geo.index ? geo : geo.toNonIndexed ? geo : geo);
+  geo = weld(geo);
   geo.computeVertexNormals();
   const p = geo.attributes.position, n = geo.attributes.normal;
   for (let i = 0; i < p.count; i++) {
@@ -51,9 +141,9 @@ function canvasTex(key, w, h, draw, { srgb = true, repeat } = {}) {
 }
 function noiseTex(key, scale = 6, contrast = 1, repeat) {
   return canvasTex('n' + key + scale + contrast, 256, 256, (g, w, h) => {
-    const img = g.createImageData(w, h);
+    const img = g.createImageData(w, h), n = fbmImage(w, h, scale, hash(key) % 97, 4);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const v = fbm((x / w) * scale, (y / h) * scale, hash(key) % 97, 4);
+      const v = n[y * w + x];
       const c = Math.max(0, Math.min(255, 128 + (v - 0.5) * 255 * contrast));
       const i = (y * w + x) * 4; img.data[i] = img.data[i + 1] = img.data[i + 2] = c; img.data[i + 3] = 255;
     }
@@ -63,9 +153,9 @@ function noiseTex(key, scale = 6, contrast = 1, repeat) {
 // micro-surface: roughness that varies between 0.75 and 1.0 of the base value, plus fine pores for bump
 function microTex(key, scale, lo = 0.75, repeat = [3, 3]) {
   return canvasTex('micro' + key + scale + lo, 256, 256, (g, w, h) => {
-    const img = g.createImageData(w, h);
+    const img = g.createImageData(w, h), n = fbmImage(w, h, scale, hash(key) % 89, 4);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const v = fbm((x / w) * scale, (y / h) * scale, hash(key) % 89, 4);
+      const v = n[y * w + x];
       const c = Math.round(255 * (lo + (1 - lo) * Math.max(0, Math.min(1, (v - 0.2) / 0.6))));
       const i = (y * w + x) * 4; img.data[i] = img.data[i + 1] = img.data[i + 2] = c; img.data[i + 3] = 255;
     }
@@ -1127,31 +1217,46 @@ export function vial(ing, color, { title = ing.name, sub = ing.latin } = {}) {
 }
 
 // ── stage ─────────────────────────────────────────────────
-// fit the camera to the object's bounding box: fixed 3/4 elevation, then solve distance and vertical centring from the projected corners
+// fit the camera to the object's bounding box: fixed 3/4 elevation, then solve distance and vertical centring from the projected corners.
+// The camera only ever slides along one fixed direction, so each sampled vertex is put into the camera's frame once and every
+// trial distance after that is a few multiplies per point instead of a full matrix projection.
 function frame(group, camera, aspect, { pad = 1.18 } = {}) {
   const box = new THREE.Box3(); group.updateWorldMatrix(true, true); group.traverse((o) => { if (o.isMesh && !o.userData.noFrame) box.expandByObject(o, false); }); const center = box.getCenter(new THREE.Vector3());
   // sample real vertices (box corners overshoot round shapes like the plinth)
-  const corners = []; group.updateWorldMatrix(true, true);
+  const pts = [], v = new THREE.Vector3();
   group.traverse((o) => {
     if (!o.isMesh || !o.visible || o.userData.noFrame) return;
-    if (o.isInstancedMesh) { o.computeBoundingBox(); const b = o.boundingBox; for (let i = 0; i < 8; i++) corners.push(new THREE.Vector3(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(o.matrixWorld)); return; }
-    const pos = o.geometry.attributes.position, step = Math.max(1, Math.floor(pos.count / 160));
-    for (let i = 0; i < pos.count; i += step) corners.push(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld));
+    if (o.isInstancedMesh) { o.computeBoundingBox(); const b = o.boundingBox; for (let i = 0; i < 8; i++) { v.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(o.matrixWorld); pts.push(v.x, v.y, v.z); } return; }
+    const pos = o.geometry.attributes.position, step = Math.max(1, Math.floor(pos.count / 160)), e = o.matrixWorld.elements;
+    for (let i = 0; i < pos.count; i += step) {
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i), w = 1 / (e[3] * x + e[7] * y + e[11] * z + e[15]);
+      pts.push((e[0] * x + e[4] * y + e[8] * z + e[12]) * w, (e[1] * x + e[5] * y + e[9] * z + e[13]) * w, (e[2] * x + e[6] * y + e[10] * z + e[14]) * w);
+    }
   });
-  if (!corners.length) corners.push(box.min.clone(), box.max.clone());
+  if (!pts.length) pts.push(box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z);
   camera.aspect = aspect; camera.updateProjectionMatrix();
-  const el = 0.2, dir = new THREE.Vector3(0, Math.sin(el), Math.cos(el)), target = center.clone(), v = new THREE.Vector3();
+  const el = 0.2, sE = Math.sin(el), cE = Math.cos(el), dir = new THREE.Vector3(0, sE, cE), target = center.clone();
+  const tH = Math.tan((camera.fov * Math.PI) / 360) / camera.zoom, kx = 1 / (tH * aspect), ky = 1 / tH;
+  // camera frame relative to the box centre: x stays x, A is height on screen, B depth toward the camera
+  const n = pts.length / 3, PX = new Float64Array(n), A = new Float64Array(n), B = new Float64Array(n);
+  for (let i = 0; i < n; i++) { const x = pts[i * 3] - center.x, y = pts[i * 3 + 1] - center.y, z = pts[i * 3 + 2] - center.z; PX[i] = x; A[i] = y * cE - z * sE; B[i] = y * sE + z * cE; }
   const place = (d) => { camera.position.copy(target).addScaledVector(dir, d); camera.lookAt(target); camera.updateMatrixWorld(); };
-  const extent = () => { let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const c of corners) { v.copy(c).project(camera); x0 = Math.min(x0, v.x); x1 = Math.max(x1, v.x); y0 = Math.min(y0, v.y); y1 = Math.max(y1, v.y); } return { x0, x1, y0, y1 }; };
+  let ty = 0;
+  const extent = (d) => {
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; const dd = d + ty * sE, ay = ty * cE;
+    for (let i = 0; i < n; i++) { const q = 1 / (dd - B[i]), px = kx * PX[i] * q, py = ky * (A[i] - ay) * q; if (px < x0) x0 = px; if (px > x1) x1 = px; if (py < y0) y0 = py; if (py > y1) y1 = py; }
+    return { x0, x1, y0, y1 };
+  };
   let d = box.getSize(v).length() * 2;
   for (let it = 0; it < 3; it++) {
     let lo = 0.2, hi = d * 3;
-    for (let k = 0; k < 24; k++) { const m = (lo + hi) / 2; place(m); const e = extent(); if (Math.max(e.x1, -e.x0, e.y1 - e.y0 > 0 ? (e.y1 - e.y0) / 2 : 0) * pad < 1 && Math.max(e.x1 - e.x0) / 2 * pad < 1) hi = m; else lo = m; }
-    d = hi; place(d);
+    for (let k = 0; k < 24; k++) { const m = (lo + hi) / 2, e = extent(m); if (Math.max(e.x1, -e.x0, e.y1 - e.y0 > 0 ? (e.y1 - e.y0) / 2 : 0) * pad < 1 && Math.max(e.x1 - e.x0) / 2 * pad < 1) hi = m; else lo = m; }
+    d = hi;
     // re-centre vertically so the projected box sits in the middle
-    const e = extent(), off = (e.y1 + e.y0) / 2, h = Math.tan((camera.fov * Math.PI) / 360) * d;
-    target.y += off * h; place(d);
+    const e = extent(d), off = (e.y1 + e.y0) / 2, h = Math.tan((camera.fov * Math.PI) / 360) * d;
+    ty += off * h;
   }
+  target.y = center.y + ty; place(d);
 }
 
 // photographic studio for reflections: big overhead softbox, two strip lights, a front fill card
@@ -1201,9 +1306,9 @@ function buildScene(renderer) {
 // honed stone for the plinth: soft cloudy mottling, a few faint veins and pits, tinted by the material color
 function stoneTex() {
   return canvasTex('stone', 512, 512, (g, w, h) => {
-    const img = g.createImageData(w, h);
+    const img = g.createImageData(w, h), N = fbmImage(w, h, 5, 11, 4), M2 = fbmImage(w, h, 22, 3, 2);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      const n = fbm((x / w) * 5, (y / h) * 5, 11, 4), m = fbm((x / w) * 22, (y / h) * 22, 3, 2);
+      const n = N[y * w + x], m = M2[y * w + x];
       const v = 238 + (n - 0.5) * 30 + (m - 0.5) * 10;
       const i = (y * w + x) * 4; img.data[i] = v; img.data[i + 1] = v - 2; img.data[i + 2] = v - 5; img.data[i + 3] = 255;
     }
@@ -1280,7 +1385,7 @@ export function createModelStage() {
   const { scene, backdrop } = buildScene(renderer);
   const camera = new THREE.PerspectiveCamera(22, 1, 0.05, 80);
   const turntable = new THREE.Group(); scene.add(turntable);
-  let host = null, raf = 0, tick = 0, lastT = 0, shownAt = 0, dirty = true, rotY = 0, velY = 0, dragging = false, lastX = 0, onScreen = true, aspect = 1, current = null;
+  let host = null, parked = false, raf = 0, tick = 0, lastT = 0, shownAt = 0, dirty = true, rotY = 0, velY = 0, dragging = false, lastX = 0, onScreen = true, aspect = 1, current = null;
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const io = new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; });
 
@@ -1299,7 +1404,7 @@ export function createModelStage() {
   }
   function loop() {
     raf = requestAnimationFrame(loop);
-    if (!host || !onScreen || document.hidden || !live) return;
+    if (!host || parked || !onScreen || document.hidden || !live) return;
     // after each pick the turntable turns slowly for a while, then comes to rest and stops redrawing until it is dragged
     const now = performance.now(), dt = Math.min(0.25, (now - lastT) / 1000); lastT = now;
     const cruise = reduce || now - shownAt > 6000 ? 0 : 0.22;
@@ -1321,10 +1426,12 @@ export function createModelStage() {
   canvas.addEventListener('pointermove', (e) => { if (!dragging) return; const dx = e.clientX - lastX; lastX = e.clientX; rotY += dx * 0.012; velY = dx * 0.7; });
   const up = () => { dragging = false; }; canvas.addEventListener('pointerup', up); canvas.addEventListener('pointercancel', up);
   return {
-    mount(el) { host = el; dirty = true; el.appendChild(canvas); ro.disconnect(); ro.observe(el); io.disconnect(); io.observe(el); resize(); if (!raf) loop(); },
+    mount(el) { host = el; parked = false; dirty = true; el.appendChild(canvas); ro.disconnect(); ro.observe(el); io.disconnect(); io.observe(el); resize(); if (!raf) loop(); },
     showIngredient(ing, oilColor, plinthColor, label) { backdrop.visible = false; return show(composeIngredient(ing, oilColor, plinthColor, label)); },
     showFragrance(f, liquid, notes, plinthColor, tint, sweep) { if (sweep) backdrop.paint(sweep[0], sweep[1]); else backdrop.visible = false; return show(composeFragrance(f, liquid, notes, plinthColor, tint)); },
     ready: () => ready,
+    // the detail panel slid away: stop drawing until the next model is mounted
+    pause() { parked = true; },
   };
 }
 

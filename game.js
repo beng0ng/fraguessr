@@ -104,9 +104,14 @@ let A = null; // app api
 let S = null; // game state
 let gameEl, hud, fab, splash, fx, fctx, mouse = null, fxItems = [], accent = '#a85d32', pins = [], timer = 0, vignette = null, pinSeq = 0;
 
+// setting scrollTop forces a layout of the page just drawn, so it is only done when the game view isn't at the top already
+let gameScrolled = false;
+function gameTop() { if (gameScrolled) { gameEl.scrollTop = 0; gameScrolled = false; } }
+
 export function openGame(api, mode) {
   A = api;
   gameEl = document.getElementById('view-game');
+  if (!gameEl.dataset.watch) { gameEl.dataset.watch = '1'; gameEl.addEventListener('scroll', () => { gameScrolled = gameEl.scrollTop > 0; }, { passive: true }); }
   A.play.active = true; A.play.ver++; A.refresh();
   A.els.app.classList.add('playing'); A.els.panel.classList.add('playing');
   A.els.list.classList.add('off-left'); A.els.detail.classList.add('off-right'); A.els.list.inert = true; A.els.detail.inert = true;
@@ -204,7 +209,7 @@ function lobby(preset, whoPreset) {
       </div>
       <p class="g-foot mono muted">${d} · ${INGREDIENTS.length} ingredients · ${FRAGRANCES.length} perfumes</p>
     </div>`;
-  gameEl.scrollTop = 0;
+  gameTop();
   enter(gameEl.querySelector('.game'));
   lightOnline();
   // a slowly turning signature bottle
@@ -314,7 +319,7 @@ function renderRound() {
         </div>
       </div>
     </div>`;
-  gameEl.scrollTop = 0;
+  gameTop();
   enter(gameEl.querySelector('.game')); enter(gameEl.querySelector('.body'));
   // 3D model
   const hero = gameEl.querySelector('#g-hero'), host = hero.querySelector('.model');
@@ -434,7 +439,7 @@ function renderReveal(km, res) {
   const tag = gameEl.querySelector('#g-hero .tag'); if (tag) tag.textContent = `${ing.place}, ${ing.country}`;
   countUp(gameEl.querySelector('.g-num'));
   gameEl.querySelectorAll('.g-line b[data-count]').forEach((el, k) => setTimeout(() => countUp(el), 250 + k * 260));
-  gameEl.scrollTop = 0;
+  gameTop();
 }
 // distance ruler: log scale from 10 km to 20,000 km, with the score tiers marked
 const rulerX = (km) => Math.max(0, Math.min(1, Math.log10(Math.max(10, km) / 10) / Math.log10(2000)));
@@ -511,7 +516,7 @@ function summary() {
       </div>
     </div>`;
   countUp(gameEl.querySelector('.g-big'));
-  gameEl.scrollTop = 0;
+  gameTop();
   enter(gameEl.querySelector('.game')); enter(gameEl.querySelector('.g-table')); enter(gameEl.querySelector('.body'));
 }
 function shareText(rank) {
@@ -926,7 +931,7 @@ function scentRender() {
           <button class="btn ghost g-sc-quit" data-act="scent-giveup">Give up and reveal the notes</button>`}
       </div>
     </div>`;
-  gameEl.scrollTop = 0;
+  gameTop();
   enter(gameEl.querySelector('.game')); enter(gameEl.querySelector('.body'));
   scentChoreo();
   scentHud(); scentHero();
@@ -1515,7 +1520,7 @@ function revealAll() {
   const st = gameEl.querySelectorAll('.g-steps i')[S.i]; st?.classList.add('done'); st?.style.setProperty('--q', Math.min(1, res.points / MAX));
   const tag = gameEl.querySelector('#g-hero .tag'); if (tag) tag.textContent = `${ing.place}, ${ing.country}`;
   gameEl.querySelectorAll('.g-brow').forEach((el, k) => el.style.setProperty('--i', k));
-  gameEl.scrollTop = 0;
+  gameTop();
   renderHud();
 }
 
@@ -1628,7 +1633,7 @@ function standings() {
       </div>
     </div>`;
   gameEl.querySelectorAll('.g-pp').forEach(countUp);
-  gameEl.scrollTop = 0;
+  gameTop();
   enter(gameEl.querySelector('.game')); enter(gameEl.querySelector('.g-table')); enter(gameEl.querySelector('.body'));
 }
 
@@ -1827,7 +1832,7 @@ function roomScreen(soft) {
       <div data-hostbits></div>
       <button class="btn ghost g-leave" data-act="leave-room">Leave the room</button>
     </div>`;
-  gameEl.scrollTop = 0;
+  gameTop();
   enter(gameEl.querySelector('.game'));
   NET.hostKey = '';
   paintRoom();

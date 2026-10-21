@@ -571,12 +571,17 @@ for (const [name, loc, z] of REGIONS) {
 // ── panel: list views ───────────────────────────────────
 let tab = 'ing', listTab = 'ing', fragSort = 'family';
 const listEl = $('#view-list'), detailEl = $('#view-detail'), filterEl = $('#filter');
+// setting scrollTop forces a layout, so panes remember whether they are scrolled and are only sent back to the top
+// when they are not there already; callers do it before swapping in new content, while the old layout is still current
+const paneScrolled = new WeakMap();
+for (const el of [listEl, detailEl]) el.addEventListener('scroll', () => paneScrolled.set(el, el.scrollTop > 0), { passive: true });
+function toTop(el) { if (paneScrolled.get(el)) { el.scrollTop = 0; paneScrolled.set(el, false); } }
 $('#count-ing').textContent = INGREDIENTS.length; $('#count-frag').textContent = FRAGRANCES.length;
 function setTab(t) {
   if (tab === 'col' && t !== 'col') markSeen();
   tab = t; if (t !== 'col') listTab = t; $('#tab-ing').setAttribute('aria-selected', t === 'ing'); $('#tab-frag').setAttribute('aria-selected', t === 'frag'); $('.panel').dataset.tab = t;
   filterEl.placeholder = { ing: 'Filter ingredients or countries…', frag: 'Filter perfumes or houses…', col: 'Filter your collection…' }[t];
-  filterEl.value = ''; models?.cancelThumbnails(); renderList(true); listEl.scrollTop = 0; showList();
+  filterEl.value = ''; models?.cancelThumbnails(); toTop(listEl); renderList(true); showList();
   if (!play.active) markMode('explore');
 }
 $('#tab-ing').addEventListener('click', () => setTab('ing'));
@@ -628,6 +633,8 @@ const sweepFor = (hex) => isDark() ? [mix(hex, '#141110', 0.82), mix(hex, '#1d19
 const chevron = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="${d === 'l' ? 'm15 18-6-6 6-6' : 'm9 18 6-6-6-6'}"/></svg>`;
 
 let groups = []; // [{key, label, color, count}] for the category bar
+let spyRaf = 0;
+const queueSpy = () => { if (!spyRaf) spyRaf = requestAnimationFrame(() => { spyRaf = 0; spy(); }); };
 function renderList(animate) {
   const q = filterEl.value.trim().toLowerCase();
   let html = ''; groups = [];
@@ -667,7 +674,7 @@ function renderList(animate) {
   const bar = groups.length > 1 ? `<nav class="catbar" aria-label="Jump to category"><button class="cb" data-jump="" aria-current="true">All<span class="mono">${tab !== 'frag' ? groups.reduce((a, g) => a + (g.n ?? g.count), 0) : FRAGRANCES.filter((f) => !q || (f.name + ' ' + f.house + ' ' + f.perfumer + ' ' + f.year).toLowerCase().includes(q)).length}</span></button>${groups.map((g) => `<button class="cb" data-jump="${g.key}">${g.color ? `<span class="dot" style="background:${g.color}"></span>` : ''}${esc(g.label)}<span class="mono">${g.count}</span></button>`).join('')}</nav>` : '';
   listEl.innerHTML = `${bar}<div class="list ${tab}">${html || '<div class="empty">Nothing matches that filter.</div>'}</div>`;
   listEl.querySelectorAll('.group-h [data-n]').forEach((el, k) => { el.textContent = groups[k]?.count ?? ''; });
-  observeThumbs(); spy();
+  observeThumbs(); queueSpy();
   if (animate) {
     cascade(listEl.querySelectorAll('.catbar .cb'), { cls: 'mv-pop', step: 30, max: 10 });
     cascade(listEl.querySelectorAll('.cat'), { step: 70, delay: 60, max: 6 });
@@ -854,10 +861,9 @@ function spy() {
     b.setAttribute('aria-current', String(on));
   });
 }
-let spyRaf = 0;
-listEl.addEventListener('scroll', () => { if (!spyRaf) spyRaf = requestAnimationFrame(() => { spyRaf = 0; spy(); }); }, { passive: true });
+listEl.addEventListener('scroll', queueSpy, { passive: true });
 listEl.addEventListener('click', (e) => {
-  const s = e.target.closest('[data-sort]'); if (s) { fragSort = s.dataset.sort; renderList(true); listEl.scrollTop = 0; return; }
+  const s = e.target.closest('[data-sort]'); if (s) { fragSort = s.dataset.sort; toTop(listEl); renderList(true); return; }
   const j = e.target.closest('[data-jump]');
   if (j) {
     const bar = listEl.querySelector('.catbar'), sec = j.dataset.jump && listEl.querySelector(`#cat-${j.dataset.jump}`);
@@ -865,7 +871,7 @@ listEl.addEventListener('click', (e) => {
     return;
   }
   const bl = e.target.closest('[data-blend]'); if (bl) { doBlend(bl.dataset.blend); return; }
-  const cv = e.target.closest('[data-cview]'); if (cv) { colView = cv.dataset.cview; renderList(true); listEl.scrollTop = 0; return; }
+  const cv = e.target.closest('[data-cview]'); if (cv) { colView = cv.dataset.cview; toTop(listEl); renderList(true); return; }
   if (e.target.closest('[data-act="col-play"]')) { startPlay(); return; }
   const fr = e.target.closest('.crow'); if (fr) { selectIngredient(fr.dataset.ing, { fact: fr.dataset.fr }); return; }
   const mf = e.target.closest('[data-mile-fact]'); if (mf) { const [id, r] = mf.dataset.mileFact.split(':'); selectIngredient(id, { fact: r }); return; }
@@ -875,8 +881,11 @@ listEl.addEventListener('click', (e) => {
   r.dataset.ing ? selectIngredient(r.dataset.ing) : selectFragrance(r.dataset.frag);
 });
 
-function showList() { listEl.classList.remove('off-left'); detailEl.classList.add('off-right'); listEl.inert = false; detailEl.inert = true; }
-function showDetail() { listEl.classList.add('off-left'); detailEl.classList.remove('off-right'); detailEl.scrollTop = 0; listEl.inert = true; detailEl.inert = false; }
+function showList() { listEl.classList.remove('off-left'); detailEl.classList.add('off-right'); listEl.inert = false; detailEl.inert = true; modelStage?.pause(); }
+function showDetail() { listEl.classList.add('off-left'); detailEl.classList.remove('off-right'); topDetail(); listEl.inert = true; detailEl.inert = false; }
+function topDetail() { toTop(detailEl); }
+// run after the next frame has painted, when reading layout costs nothing extra
+const afterPaint = (fn) => requestAnimationFrame(() => setTimeout(fn, 0));
 
 // ── detail views ───────────────────────────────────────
 let vignette = null, modelStage = null;
@@ -931,7 +940,7 @@ function heroFor(kind, el, payload) {
   }
   const later = (fn) => (modelStage ? setTimeout(fn, 160) : window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 700 }) : setTimeout(fn, 450));
   later(() => getStage().then((st) => {
-    if (!host.isConnected) return;
+    if (!host.isConnected || detailEl.classList.contains('off-right')) return;
     if (!st) { el.classList.add('no-3d'); return; }
     st.mount(host);
     const dark = isDark();
@@ -975,6 +984,7 @@ function selectIngredient(id, { fly = true, fact } = {}) {
   const by = { top: [], heart: [], base: [] }; uses.forEach((u) => by[u.tier].push(u.f));
   const usedList = (t) => by[t].length ? `<div class="tier"><span class="k">${TIER_LABEL[t]}</span><div class="notes">${by[t].sort((a, b) => a.name.localeCompare(b.name)).map((f) => `<button class="badge note" data-frag="${f.id}">${esc(f.name)} <span class="mono muted">${esc(f.house)}</span></button>`).join('')}</div></div>` : '';
   const fam = FAMILIES[ing.family];
+  topDetail();
   detailEl.innerHTML = `
     <div class="detail">
       <div class="detail-top"><button class="btn icon ghost" data-back aria-label="Back to list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
@@ -1045,6 +1055,7 @@ function selectFragrance(id) {
   const total = Math.round(dists.reduce((a, b) => a + b, 0));
   const far = f.ingredients.length ? ING[f.ingredients[dists.indexOf(Math.max(...dists))]] : null;
   const lead = f.ingredients.slice().sort((a, b) => USES[a].length - USES[b].length)[0];
+  topDetail();
   detailEl.innerHTML = `
     <div class="detail">
       <div class="detail-top"><button class="btn icon ghost" data-back aria-label="Back to list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
@@ -1093,11 +1104,13 @@ detailEl.addEventListener('click', (e) => {
   const f = e.target.closest('[data-frag]'); if (f) selectFragrance(f.dataset.frag);
 });
 function markActive() { listEl.querySelectorAll('.active').forEach((el) => el.classList.remove('active')); const k = sel.ing ? `[data-ing="${sel.ing.id}"]` : sel.frag ? `[data-frag="${sel.frag.id}"]` : null; const el = k && listEl.querySelector(k); if (!el) return; el.classList.add('active');
-  // keep the picked item in view for when the list slides back (without scrolling the page itself)
-  const rail = el.closest('.rail'); if (rail) rail.scrollLeft = el.offsetLeft - rail.clientWidth / 2 + el.offsetWidth / 2;
-  const host = el.closest('.cat') || el, bar = listEl.querySelector('.catbar')?.offsetHeight || 0;
-  const top = host.getBoundingClientRect().top - listEl.getBoundingClientRect().top + listEl.scrollTop - bar;
-  if (top < listEl.scrollTop || top + host.offsetHeight > listEl.scrollTop + listEl.clientHeight - bar) listEl.scrollTop = top - 4; }
+  // keep the picked item in view for when the list slides back (without scrolling the page itself);
+  // the list is sliding away, so this waits for the next painted frame instead of forcing a layout mid-click
+  afterPaint(() => { if (!el.isConnected || !el.classList.contains('active')) return;
+    const rail = el.closest('.rail'); if (rail) rail.scrollLeft = el.offsetLeft - rail.clientWidth / 2 + el.offsetWidth / 2;
+    const host = el.closest('.cat') || el, bar = listEl.querySelector('.catbar')?.offsetHeight || 0;
+    const top = host.getBoundingClientRect().top - listEl.getBoundingClientRect().top + listEl.scrollTop - bar;
+    if (top < listEl.scrollTop || top + host.offsetHeight > listEl.scrollTop + listEl.clientHeight - bar) listEl.scrollTop = top - 4; }); }
 function clearSelection() { setTint(null); sel.ing = null; sel.frag = null; vignette?.stop(); vignette = null; stopTour(); markActive(); setHash(''); pauseSpin(1500); view.tScale = Math.min(view.tScale, 1.3); }
 
 // ── journey: collect each note where it grows, then blend them at the house ──

@@ -1440,6 +1440,9 @@ body { font-variant-numeric: lining-nums; }
 .hero .hero-ph { position: absolute; left: 50%; top: 50%; height: 94%; width: auto; aspect-ratio: 1; transform: translate(-50%, -50%); pointer-events: none; transition: opacity .5s var(--ease); }
 .hero.frag .hero-ph { -webkit-mask-image: radial-gradient(closest-side, #000 70%, transparent); mask-image: radial-gradient(closest-side, #000 70%, transparent); }
 .hero.loaded .hero-ph { opacity: 0; }
+
+/* v43: long lists only lay out and paint the rows on screen */
+.list.frag .row { content-visibility: auto; contain-intrinsic-size: auto 44px; }
 </style>
 
 </head>
