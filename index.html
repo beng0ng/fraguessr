@@ -26,7 +26,7 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preload" href="https://cdn.jsdelivr.net/npm/cobe@2.0.1/dist/index.esm.js" as="fetch" crossorigin>
 <!-- every module the daily page needs, fetched in parallel instead of one import at a time -->
-<link rel="modulepreload" href="app.js"><link rel="modulepreload" href="data.js"><link rel="modulepreload" href="facts.js"><link rel="modulepreload" href="world.js"><link rel="modulepreload" href="fx.js"><link rel="modulepreload" href="rarity.js"><link rel="modulepreload" href="motion.js"><link rel="modulepreload" href="game.js"><link rel="modulepreload" href="stats.js"><link rel="modulepreload" href="borders.js">
+<link rel="modulepreload" href="app.js"><link rel="modulepreload" href="data.js"><link rel="modulepreload" href="facts.js"><link rel="modulepreload" href="world.js"><link rel="modulepreload" href="fx.js"><link rel="modulepreload" href="rarity.js"><link rel="modulepreload" href="motion.js"><link rel="modulepreload" href="intro.js"><link rel="modulepreload" href="game.js"><link rel="modulepreload" href="stats.js"><link rel="modulepreload" href="borders.js">
 <meta name="apple-mobile-web-app-title" content="Fraguessr">
 <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"Fraguessr","url":"https://fraguessr.com/","description":"A daily perfume guessing game: name the notes in today's fragrance, then pin where they grow on a 3D globe.","applicationCategory":"GameApplication","operatingSystem":"Any","browserRequirements":"Requires a modern web browser","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
 <title>Fraguessr: the daily perfume guessing game</title>
@@ -39,6 +39,13 @@
   "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
 } }
+</script>
+<script>
+// a bare visit opens on the opening page; its animation waits for the fonts (briefly) so the name doesn't change face mid-rise
+if (location.hash.length < 2 && !/[?&]prerender/.test(location.search)) {
+  const r = document.documentElement, go = () => r.classList.add('intro-go');
+  r.classList.add('intro-on'); setTimeout(go, 900); document.fonts?.ready.then(go);
+}
 </script>
 <style>
 @property --accent { syntax: '<color>'; inherits: true; initial-value: #a85d32; }
@@ -1446,7 +1453,125 @@ body { font-variant-numeric: lining-nums; }
 /* v44: the placeholder is the model's own first frame, so the live model appears under it and it fades away on top */
 .hero .hero-ph.still { left: 0; top: 0; width: 100%; height: 100%; aspect-ratio: auto; object-fit: cover; transform: none; -webkit-mask-image: none; mask-image: none; transition: opacity .45s var(--ease); }
 .hero .model:has(.still) .bottle-canvas { transition: none; transform: none; }
+
+/* ── v45: the opening page ──
+   Shown on a bare visit to the site. The mark draws itself (bottle, then the globe inside it, then a puff of scent),
+   the name rises letter by letter, and two doors open: today's scent and the atlas. Scent motes drift up behind. */
+.intro { display: none; }
+html.intro-on .intro { display: grid; }
+.intro { position: fixed; inset: 0; z-index: 60; place-items: center; overflow: hidden auto; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  background: radial-gradient(60% 50% at 50% 38%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 70%), radial-gradient(90% 70% at 50% 110%, color-mix(in srgb, var(--gold) 14%, transparent), transparent 70%), var(--background);
+  transition: opacity .7s var(--ease), transform .8s var(--ease), filter .7s var(--ease); }
+.intro.out { opacity: 0; transform: scale(1.04); filter: blur(6px); pointer-events: none; }
+.in-motes { position: absolute; inset: 0; pointer-events: none; }
+.in-motes i { position: absolute; bottom: -24px; left: var(--x); width: var(--s); height: var(--s); border-radius: 50%; background: var(--c); opacity: 0; filter: blur(.5px);
+  animation: inMote var(--t) linear var(--d) infinite; }
+@keyframes inMote { 0% { transform: translate(0, 0) scale(.6); opacity: 0; } 12% { opacity: var(--o); } 70% { opacity: calc(var(--o) * .7); } 100% { transform: translate(var(--w), -112vh) scale(1.15); opacity: 0; } }
+.in-col { position: relative; width: min(760px, 100%); display: grid; justify-items: center; text-align: center; }
+.in-mark { position: relative; width: 116px; height: 116px; margin-bottom: 10px; color: var(--foreground); }
+.in-mark::before { content: ""; position: absolute; inset: -40px; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, var(--accent) 28%, transparent), transparent); opacity: 0; transform: scale(.4); animation: inHalo 1.6s var(--ease) .5s forwards; }
+@keyframes inHalo { to { opacity: 1; transform: none; } }
+.in-mark svg { position: relative; width: 100%; height: 100%; overflow: visible; }
+.in-mark .b-body, .in-mark .b-collar, .in-mark .b-mer { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.in-mark .b-body { animation: inDraw .9s var(--ease) .1s forwards; }
+.in-mark .b-collar { animation: inDraw .4s var(--ease) .55s forwards; }
+.in-mark .b-cap { transform: translateY(-4px); opacity: 0; animation: inCap .5s var(--spring) .7s forwards; }
+.in-mark .b-globe { transform-box: fill-box; transform-origin: center; transform: scale(0); animation: inPop .7s var(--spring) .75s forwards; }
+.in-mark .b-mer { animation: inDraw .6s var(--ease) 1.1s forwards; }
+.in-mark .b-puff { transform-box: fill-box; transform-origin: center; transform: scale(0); opacity: 0; animation: inPuff .5s var(--spring) forwards, inBreath 3.2s ease-in-out infinite; }
+.in-mark .b-puff:nth-of-type(1) { animation-delay: 1.15s, 1.8s; } .in-mark .b-puff:nth-of-type(2) { animation-delay: 1.25s, 2s; } .in-mark .b-puff:nth-of-type(3) { animation-delay: 1.35s, 2.2s; }
+@keyframes inDraw { to { stroke-dashoffset: 0; } }
+@keyframes inCap { to { transform: none; opacity: 1; } }
+@keyframes inPop { to { transform: none; } }
+@keyframes inPuff { to { transform: none; opacity: var(--o, 1); } }
+@keyframes inBreath { 50% { transform: scale(1.35) translate(1px, -1px); } }
+.in-word { margin: 0; font-family: var(--font-display); font-weight: 500; font-size: clamp(54px, 9vw, 92px); line-height: .95; letter-spacing: -0.015em; }
+.in-word span { display: inline-block; opacity: 0; transform: translateY(.35em); filter: blur(6px); animation: inRise .8s var(--ease) calc(.95s + var(--i) * 45ms) forwards; }
+@keyframes inRise { to { opacity: 1; transform: none; filter: none; } }
+.in-tag { margin: 14px 0 0; max-width: 32ch; color: var(--muted-foreground); font-size: clamp(15px, 1.6vw, 17px); text-wrap: balance; opacity: 0; animation: inUp .8s var(--ease) 1.45s forwards; }
+@keyframes inUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.in-cards { width: 100%; display: grid; grid-template-columns: 1.15fr 1fr; gap: 14px; margin-top: 30px; }
+.in-card { position: relative; display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; min-height: 128px; padding: 16px 18px; border-radius: 18px; text-align: left; cursor: pointer; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--c, var(--accent)) 30%, var(--border)); background: color-mix(in srgb, var(--card) 86%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  box-shadow: var(--shadow); opacity: 0; animation: inUp .8s var(--ease) 1.65s forwards; transition: transform .35s var(--ease), box-shadow .35s var(--ease), border-color .35s; }
+.in-card + .in-card { animation-delay: 1.77s; }
+.in-card:hover { transform: translateY(-3px); border-color: color-mix(in srgb, var(--c, var(--accent)) 55%, var(--border)); box-shadow: var(--shadow), 0 18px 40px -22px color-mix(in srgb, var(--c, var(--accent)) 70%, transparent); }
+.in-card:active { transform: scale(.985); }
+.in-card::before { content: ""; position: absolute; inset: 0; background: radial-gradient(90% 120% at 0% 50%, color-mix(in srgb, var(--c, var(--accent)) 16%, transparent), transparent 65%); pointer-events: none; }
+.in-art { position: relative; width: 92px; height: 92px; display: grid; place-items: center; }
+.in-art img { width: 112%; height: 112%; object-fit: contain; filter: drop-shadow(0 10px 14px rgba(40, 25, 10, .22)); animation: inFloat 5s ease-in-out 2.4s infinite; }
+@keyframes inFloat { 50% { transform: translateY(-5px) rotate(-1.5deg); } }
+.in-art svg { width: 78px; height: 78px; color: var(--c, var(--accent)); }
+.in-art .g-spin { transform-box: fill-box; transform-origin: center; animation: inSpin 6s linear infinite; }
+.in-art .g-spin:nth-of-type(2) { animation-delay: -3s; }
+@keyframes inSpin { 0% { transform: scaleX(1); } 50% { transform: scaleX(-1); } 100% { transform: scaleX(1); } }
+.in-txt { position: relative; display: grid; gap: 3px; min-width: 0; }
+.in-txt .mono { color: var(--muted-foreground); font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; }
+.in-txt b { font-family: var(--font-display); font-weight: 500; font-size: 27px; line-height: 1.05; }
+.in-txt b em { display: block; margin-top: 2px; font-family: var(--font-sans); font-style: normal; font-size: 13px; font-weight: 500; color: var(--muted-foreground); }
+.in-txt > span:last-of-type { color: var(--muted-foreground); font-size: 13.5px; line-height: 1.4; }
+.in-go { position: relative; grid-column: 1 / -1; justify-self: start; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 16px; border-radius: 999px; font-weight: 600; font-size: 14px;
+  background: var(--primary); color: var(--primary-foreground); transition: gap .3s var(--ease); }
+.in-card:hover .in-go { gap: 11px; }
+.in-atlas .in-go { background: none; color: var(--foreground); box-shadow: inset 0 0 0 1px var(--border); }
+.in-go svg { width: 15px; height: 15px; }
+.in-daily .in-live { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--accent); vertical-align: 1px; box-shadow: 0 0 0 0 var(--accent); animation: inLive 2s ease-out 2.2s infinite; }
+@keyframes inLive { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+.in-foot { margin: 22px 0 0; color: var(--muted-foreground); opacity: 0; animation: inUp .8s var(--ease) 2s forwards; }
+.in-foot:empty { display: none; }
+.in-skip { position: absolute; top: max(14px, env(safe-area-inset-top)); right: 16px; height: 32px; padding: 0 12px; border: 0; border-radius: 999px; background: none; color: var(--muted-foreground); font: 500 13px/1 var(--font-sans); cursor: pointer; opacity: 0; animation: inUp .6s var(--ease) .4s forwards; }
+.in-skip:hover { color: var(--foreground); background: var(--muted); }
+html.intro-on:not(.intro-go) .intro * { animation-play-state: paused !important; }
+html.intro-on .app { visibility: hidden; }
+html.intro-on.intro-leaving .app { visibility: visible; }
+@media (max-width: 640px) {
+  .in-cards { grid-template-columns: 1fr; gap: 10px; margin-top: 24px; }
+  .in-card { min-height: 0; padding: 14px; }
+  .in-art { width: 72px; height: 72px; } .in-art svg { width: 62px; height: 62px; }
+  .in-mark { width: 92px; height: 92px; }
+  .in-txt b { font-size: 24px; }
+}
+@media (max-height: 640px) and (min-width: 641px) { .in-mark { width: 80px; height: 80px; } .in-cards { margin-top: 20px; } }
+@media (prefers-reduced-motion: reduce) {
+  .intro *, .intro *::before { animation: none !important; opacity: 1 !important; transform: none !important; filter: none !important; stroke-dashoffset: 0 !important; }
+  .in-motes { display: none; }
+  .intro { transition: opacity .3s; } .intro.out { transform: none; filter: none; }
+}
 </style>
+
+<div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="in-word">
+  <div class="in-motes" aria-hidden="true"></div>
+  <button class="in-skip" data-go="explore">Skip</button>
+  <div class="in-col">
+    <div class="in-mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none">
+        <path class="b-cap" d="M9.5 2.5h5v3h-5z" fill="currentColor"/>
+        <path class="b-collar" pathLength="1" d="M10.5 5.5h3v2h-3z" stroke="currentColor" stroke-width="1"/>
+        <rect class="b-body" pathLength="1" x="4.5" y="7.5" width="15" height="14" rx="4" stroke="currentColor" stroke-width="1.1"/>
+        <circle class="b-globe" cx="12" cy="14.5" r="3.6" fill="var(--accent)"/>
+        <path class="b-mer" pathLength="1" d="M12 10.9c-1.3 1-1.9 2.2-1.9 3.6s.6 2.6 1.9 3.6M8.4 14.5h7.2" stroke="var(--background)" stroke-width=".8"/>
+        <circle class="b-puff" cx="18" cy="3" r="1" fill="var(--accent)"/>
+        <circle class="b-puff" cx="20.5" cy="4.6" r=".75" fill="var(--accent)" style="--o:.7"/>
+        <circle class="b-puff" cx="20.6" cy="1.6" r=".6" fill="var(--accent)" style="--o:.5"/>
+      </svg>
+    </div>
+    <h1 class="in-word" id="in-word" aria-label="Fraguessr"><span aria-hidden="true" style="display:contents"><span style="--i:0">F</span><span style="--i:1">r</span><span style="--i:2">a</span><span style="--i:3">g</span><span style="--i:4">u</span><span style="--i:5">e</span><span style="--i:6">s</span><span style="--i:7">s</span><span style="--i:8">r</span></span></h1>
+    <p class="in-tag">Guess the notes in today’s perfume, then find where in the world they grow.</p>
+    <div class="in-cards">
+      <button class="in-card in-daily" data-go="play">
+        <span class="in-art"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="9" width="12" height="12" rx="2.5"/><path d="M10 9V6h4v3M9 3h6"/><path d="M9 15h6" opacity=".6"/></svg></span>
+        <span class="in-txt"><span class="mono"><span class="in-live"></span><span data-in="label">Today’s scent</span></span><b data-in="name">Today’s scent</b><span data-in="line">Name its notes with five chances. Every one you find deals a fun fact.</span></span>
+        <span class="in-go"><span data-in="cta">Play today’s scent</span><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg></span>
+      </button>
+      <button class="in-card in-atlas" data-go="explore">
+        <span class="in-art"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.1"><circle cx="12" cy="12" r="9"/><ellipse class="g-spin" cx="12" cy="12" rx="4.2" ry="9"/><ellipse class="g-spin" cx="12" cy="12" rx="7.5" ry="9" opacity=".5"/><path d="M3.3 9h17.4M3.3 15h17.4" opacity=".6"/></svg></span>
+        <span class="in-txt"><span class="mono">The atlas</span><b>Explore the world of scent</b><span data-in="atlas">Every ingredient on a globe, and the perfumes it goes into.</span></span>
+        <span class="in-go">Open the atlas<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+      </button>
+    </div>
+    <p class="in-foot mono" data-in="foot"></p>
+  </div>
+</div>
 
 </head>
 <body>

@@ -18,6 +18,7 @@ import { createWorldLayer } from './world.js';
 import { FACTS, LEGACY_TIER } from './facts.js';
 import { RARITY, RARITIES } from './rarity.js';
 import { letters, cascade, countUp, replay, burst } from './motion.js';
+import { initIntro } from './intro.js';
 
 const $ = (s) => document.querySelector(s);
 const ING = Object.fromEntries(INGREDIENTS.map((i) => [i.id, i]));
@@ -1637,7 +1638,16 @@ new ResizeObserver(() => { size(); world.resize(); resizeDots(); globe?.update(g
 renderList(true);
 initGlobe();
 // the daily scent is the front door; a shared link to the atlas, an ingredient or a perfume opens the atlas
-if (location.hash.length > 1 && !location.hash.startsWith('#play')) { markMode('explore'); fromHash(); } else startPlay();
+// a bare visit opens on the opening page, with the atlas waiting behind it, zoomed out, until a door is picked
+const intro = initIntro({
+  daily: (gamePromise ||= import('./game.js')).then((m) => { const d = m.dailyInfo(); return { ...d, color: fragHex(FRAG[d.id]) }; }),
+  counts: { ingredients: INGREDIENTS.length, perfumes: FRAGRANCES.length, countries: new Set(INGREDIENTS.map((i) => i.country)).size },
+  foot: myNotes.size ? `${myNotes.size} notes and ${seenFacts.size.toLocaleString('en-US')} facts in your collection` : '',
+  colors: Object.keys(FAMILIES).map(famHex), thumbs: THUMBS,
+  onPlay: () => { view.tScale = 1; startPlay(); }, onExplore: () => { markMode('explore'); view.tScale = 1; },
+});
+if (intro) { markMode('explore'); view.scale = view.tScale = 0.62; }
+else if (location.hash.length > 1 && !location.hash.startsWith('#play')) { markMode('explore'); fromHash(); } else startPlay();
 // warm the 3D module in the background; the public site has every image ready-made, so it waits until the atlas is opened
 function warmModels() { (window.requestIdleCallback || setTimeout)(() => getModels()); }
 if (!THUMBS) warmModels();

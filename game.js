@@ -589,6 +589,13 @@ const ING_BY = Object.fromEntries(INGREDIENTS.map((i) => [i.id, i]));
 // today's perfume, for the welcome card (works before the game has opened)
 export const todayScent = () => scentOf(today());
 export const scentPoolIds = () => scentPool().map((f) => f.id); // for the build script that pre-renders the bottles
+// for the opening page: today's perfume and where this player stands with it
+export function dailyInfo() {
+  const d = today(), f = scentOf(d), st = store.get(`scent:${d}`), streak = store.get('scent:streak');
+  const done = st?.id === f.id && !!st.over, started = st?.id === f.id && !!st.log.length, got = started ? st.log.filter((e) => e.hit).length : 0;
+  return { id: f.id, name: f.name, house: f.house, label: dailyName(d), total: scentSize(f), got, done, started,
+    streak: streak && (streak.last === d || streak.last === prevDay(d)) ? streak.n : 0 };
+}
 function scentPool() {
   if (scentOrder) return scentOrder;
   const pool = SCENT_POOL.map((id) => FRAGRANCES.find((f) => f.id === id)).filter((f) => f && scentSize(f) >= SCENT_MIN && scentSize(f) <= SCENT_MAX), r = rng(hash('fraguessr:scent'));
