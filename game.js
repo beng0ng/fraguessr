@@ -1051,7 +1051,7 @@ function dailyHistory() {
   } catch {}
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }
-function dailyStats() {
+export function dailyStats() {
   const h = dailyHistory(), d = today(), st = store.get('scent:streak');
   let best = 0, run = 0, prev = null;
   for (const x of h) { run = prev && prevDay(x.date) === prev ? run + 1 : 1; best = Math.max(best, run); prev = x.date; }

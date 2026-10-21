@@ -19,7 +19,9 @@
             ".validate": "$k.matches(/^[0-9]{1,2}$/) && newData.isNumber() && newData.val() === (data.exists() ? data.val() : 0) + 1"
           }
         },
-        "$other": { ".validate": false }
+        "$other": {
+          ".validate": false
+        }
       }
     },
     "subs": {
@@ -28,6 +30,18 @@
           ".read": "auth != null && auth.uid === $uid",
           ".write": "auth != null && auth.uid === $uid && !data.exists()",
           ".validate": "$date.matches(/^20[0-9][0-9]-[01][0-9]-[0-3][0-9]$/) && newData.val() === true"
+        }
+      }
+    },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid && auth.token.firebase.sign_in_provider !== 'anonymous'",
+        "save": {
+          ".validate": "newData.hasChildren(['json', 'at']) && newData.child('json').isString() && newData.child('json').val().length < 4000000 && newData.child('at').isNumber()"
+        },
+        "$other": {
+          ".validate": false
         }
       }
     }

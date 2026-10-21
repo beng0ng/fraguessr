@@ -704,7 +704,7 @@ function renderCollection(q) {
       <div class="col-stat"><b>${seenFacts.size}</b><span>of ${FACT_TOTAL.toLocaleString('en-US')} facts earned</span><i style="--p:${pct(seenFacts.size, FACT_TOTAL)}"></i></div>
     </div>
     <div class="col-rar">${RARITIES.map((r) => `<span style="--r:${RARITY[r].col}" title="${RARITY[r].label} facts turn up ${ODDS[r]}% of the time and pay ${YIELD[r]} drops of essence">${pips(RARITY[r].pips)}<b>${per[r].have}</b><small>/ ${per[r].all}</small><em>${ODDS[r]}%</em></span>`).join('')}</div>
-    <p class="col-sync" data-st="${syncState}">${SYNC_TEXT[syncState]}</p>
+    <p class="col-sync" data-st="${syncState}">${syncText(syncState)}</p>
     ${myNotes.size ? '' : `<div class="col-empty"><p>Your album is empty. Name notes in the daily scent: each one you find joins your collection and deals one of its fun facts.</p><button class="btn primary" data-act="col-play">Play the daily scent</button></div>`}
   </div>
   <div class="toolbar" style="padding:10px 16px 4px"><span class="mono muted">${colView === 'notes' ? 'Sorted by family' : colView === 'facts' ? `Rarest first${newFacts.size ? ` · ${newFacts.size} new` : ''}` : colView === 'lab' ? `${dropsTotal().toLocaleString('en-US')} drops` : `${MILESTONES.filter((m) => miles[m.id]).length} of ${MILESTONES.length} reached`}</span><div class="seg">${[['notes', 'Notes'], ['facts', 'Facts'], ['lab', 'Perfumes'], ['miles', 'Goals']].map(([v, l]) => `<button data-cview="${v}" aria-pressed="${colView === v}">${l}</button>`).join('')}</div></div>`;
@@ -1432,8 +1432,10 @@ function adoptSaved() {
   loadLab();
   collectionChanged();
 }
+let acctOn = false; // the public site's own accounts (account.js) are switched on
 const SYNC_TEXT = { local: 'Saved in this browser.', synced: 'Saved to your account, so it follows you to other devices.', retry: 'Saved in this browser. Your account couldn’t be reached just now, so it will try again.' };
-function setSyncState(st) { syncState = st; const el = listEl.querySelector('.col-sync'); if (el) { el.textContent = SYNC_TEXT[st]; el.dataset.st = st; } }
+const syncText = (st) => (st === 'local' && acctOn ? 'Saved in this browser. Sign in to keep it safe and carry it to any device.' : SYNC_TEXT[st]);
+function setSyncState(st) { syncState = st; const el = listEl.querySelector('.col-sync'); if (el) { el.textContent = syncText(st); el.dataset.st = st; } }
 function makeFact(id, r, extra) {
   const ing = ING[id];
   return cardKit.factCard(FACTS[id][r], { id: factKey(id, r), name: ing.name, place: ing.country, col: ingHex(ing), shape: SHAPE[ing.family], isDark, still: reduceMotion, scene: cardKit.SCENES[id]?.[r], ...extra });
@@ -1714,4 +1716,20 @@ else if (location.hash.length > 1 && !location.hash.startsWith('#play')) { markM
 // warm the 3D module in the background; the public site has every image ready-made, so it waits until the atlas is opened
 function warmModels() { (window.requestIdleCallback || setTimeout)(() => getModels()); }
 if (!THUMBS) warmModels();
-import('./sync.js').then((m) => m.startSync({ onAdopt: adoptSaved, onState: setSyncState })).then((s) => { sync = s; }).catch(() => {});
+import('./sync.js').then((m) => m.startSync({ onAdopt: adoptSaved, onState: setSyncState })).then((s) => { sync ||= s; }).catch(() => {});
+// accounts on the public site (account.js): sign up, sign in, and a profile with the player's record
+import('./account.js').then((m) => {
+  const acct = m.initAccount({ button: $('#open-account'), summary: playerSummary, sync: { onAdopt: adoptSaved, onState: setSyncState, set: (s) => { sync = s; } } });
+  if (acct) { acctOn = true; setSyncState(syncState); }
+}).catch(() => {});
+async function playerSummary() {
+  const d = (await (gamePromise ||= import('./game.js'))).dailyStats(), L = loginState(), sum = (o) => Object.values(o || {}).reduce((a, n) => a + n, 0);
+  let sky = {}; try { sky = JSON.parse(localStorage.getItem('noteguessr:sky')) || {}; } catch {}
+  const n = (v) => Number(v || 0).toLocaleString('en');
+  return [
+    [n(d.played), 'Daily scents played'], [`${d.avg}%`, 'Notes found per game'], [n(d.bestScore), 'Best daily score'],
+    [n(d.best), 'Best daily streak'], [n(L.n), `Login streak · best ${n(Math.max(L.best, L.n))}`], [`${n(myNotes.size)} / ${n(INGREDIENTS.length)}`, 'Notes collected'],
+    [`${n(seenFacts.size)} / ${n(FACT_TOTAL)}`, 'Facts found'], [`${MILESTONES.filter((m) => miles[m.id]).length} / ${MILESTONES.length}`, 'Goals reached'], [n(sum(lab.made)), 'Perfumes blended'],
+    [n(sum(lab.got)), 'Essence drops earned'], [n(sky.won), 'Sky challenges won'], [n(d.perfect), 'Perfect dailies'],
+  ];
+}
