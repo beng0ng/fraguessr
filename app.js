@@ -21,7 +21,7 @@ import { FACTS, LEGACY_TIER } from './facts.js';
 import { RARITY, RARITIES } from './rarity.js';
 import { letters, cascade, countUp, replay, burst } from './motion.js';
 import { initIntro } from './intro.js';
-import { checkIn, loginState } from './streak.js';
+import { checkIn, loginState, LADDER, CHEST, rarer } from './streak.js';
 
 const $ = (s) => document.querySelector(s);
 const ING = Object.fromEntries(INGREDIENTS.map((i) => [i.id, i]));
@@ -1268,19 +1268,19 @@ function earn(id, r, k = 1) { if (!ING[id] || !YIELD[r]) return 0; lab.got[id] =
 // `best`; facts not found yet come first, the rest are drawn at the usual odds, and each pays double essence
 const ALL_IDS = INGREDIENTS.map((i) => i.id).filter((id) => FACTS[id]);
 const shuffled = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-function openChest(ids, n, best) {
-  const out = [], taken = new Set(), mine = shuffled(ids.filter((id) => FACTS[id])), pool = [...mine, ...shuffled(ALL_IDS)];
+function openChest(avoid, n, best) {
+  const out = [], taken = new Set(), skip = new Set(avoid), pool = shuffled(ALL_IDS.filter((id) => !skip.has(id)));
   const fresh = (id, r) => FACTS[id]?.[r] && !seenFacts.has(factKey(id, r)) && !taken.has(factKey(id, r));
   const take = (id, r) => { taken.add(factKey(id, r)); out.push({ id, r }); };
   const bi = RARITIES.indexOf(best);
   // the promised one: that rarity, else the nearest rarer, else the nearest commoner
   for (const r of [...RARITIES.slice(bi), ...RARITIES.slice(0, bi).reverse()]) { const id = pool.find((x) => fresh(x, r)); if (id) { take(id, r); break; } }
-  for (let tries = 0; out.length < n && tries < 60; tries++) {
-    // a different note for each fact while today's notes last
-    const spare = mine.filter((x) => !out.some((o) => o.id === x)), id = spare.length ? spare[0] : mine.length ? mine[tries % mine.length] : pool[tries % pool.length], r = drawFact(id);
-    if (fresh(id, r)) { take(id, r); continue; }
-    const alt = RARITIES.find((x) => fresh(id, x)); if (alt && tries < 30) { take(id, alt); continue; }
-    const other = pool.find((x) => fresh(x, r)); if (other) take(other, r);
+  // the rest at the usual odds, a different note each, falling back to a note's commonest fact still to find
+  for (const id of pool) {
+    if (out.length >= n) break;
+    if (out.some((o) => o.id === id)) continue;
+    const r = drawFact(id), alt = fresh(id, r) ? r : RARITIES.find((x) => fresh(id, x));
+    if (alt) take(id, alt);
   }
   // a collection with nothing left to find still gets its chest, as facts already held (they pay their essence)
   while (out.length < n) { const id = pool[out.length % pool.length]; take(id, drawFact(id)); }
@@ -1424,7 +1424,7 @@ function dirty() { sync?.dirty(); }
 // another device's progress arrived in localStorage: reload what the page holds in memory
 function adoptSaved() {
   const before = new Set(seenFacts);
-  loadFacts();
+  loadFacts(); renderLoginBar();
   for (const k of seenFacts) if (!before.has(k)) newFacts.add(k);
   if (newFacts.size) { saveNew(); $('#tab-col').classList.add('has-new'); }
   myNotes.clear(); try { for (const [id, n] of Object.entries(JSON.parse(localStorage.getItem('noteguessr:notes') || '{}'))) if (ING[id]) myNotes.set(id, n); } catch {}
@@ -1676,10 +1676,35 @@ new ResizeObserver(() => { size(); world.resize(); sky.resize(); resizeDots(); g
 renderList(true);
 initGlobe();
 checkIn();
+// ── the login bar: the streak and today's chest along the top of the app (streak.js; the chest's sheet is in game.js) ──
+const loginBar = $('#loginbar');
+const chestApi = { facts: { chest: openChest, mount: mountFact }, ING, esc, saved: () => { dirty(); renderLoginBar(); } };
+const FLAME = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c.6 3.2 2.6 4.9 4.3 6.8A7.4 7.4 0 0 1 12 21.5a7.2 7.2 0 0 1-7-7.2c0-2.8 1.4-4.6 2.9-5.9.2 1.9.9 3.2 2.1 3.9C9.4 8.6 10.4 5.2 12 2.5z" fill="currentColor"/><path d="M12 13c1.7 1.5 2.8 2.7 2.8 4.4a2.8 2.8 0 0 1-5.6 0c0-1.5.9-2.8 2.8-4.4z" fill="#ffd66b"/></svg>';
+function renderLoginBar() {
+  if (!loginBar) return;
+  const L = loginState(), k = Math.max(1, L.n), next = L.opened ? L.tomorrow : L.chest, seen = !!localStorage.getItem(`noteguessr:chest:${L.today}`);
+  const week = LADDER.map((x, i) => `<i class="${i < L.rung ? 'past' : i === L.rung ? 'now' : ''}" style="--r:${RARITY[x.best].col}"></i>`).join('');
+  loginBar.style.setProperty('--r', RARITY[next.best].col);
+  loginBar.innerHTML = `<span class="lb-streak" title="Visit on consecutive days to grow the chest; miss a day and the streak starts over">${FLAME}<span>${k > 1 ? `<b>${k}</b>-day streak` : `Streak day <b>1</b>`}</span></span>`
+    + `<span class="lb-week" title="Day ${L.rung + 1} of 7: the chest grows each day, up to a legendary on day 7">${week}</span>`
+    + (L.opened
+      // opened on another device: nothing to show here, so the pill is only a note
+      ? `<${seen ? 'button data-lb="see" title="See today’s chest"' : 'span'} class="lb-chest done"><span class="lb-ico">${CHEST}</span><span class="lb-t">Chest opened</span><span class="lb-s">Tomorrow: ${next.n} facts, ${rarer(next.best)}</span></${seen ? 'button' : 'span'}>`
+      : `<button class="lb-chest ready" data-lb="open"><span class="lb-ico">${CHEST}</span><span class="lb-t">Daily chest</span><span class="lb-s">${next.n} facts, ${rarer(next.best)}</span><b>Open</b></button>`);
+  loginBar.hidden = false;
+}
+loginBar?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-lb]'); if (!b) return;
+  gamePromise ||= import('./game.js');
+  gamePromise.then((m) => (b.dataset.lb === 'open' ? m.openDailyChest(chestApi) : m.seeDailyChest(chestApi)));
+});
+renderLoginBar();
+// a tab left open past midnight UTC starts the next day when it comes back
+addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { checkIn(); renderLoginBar(); } });
 // the daily scent is the front door; a shared link to the atlas, an ingredient or a perfume opens the atlas
 // a bare visit opens on the opening page, with the atlas waiting behind it, zoomed out, until a door is picked
 const intro = initIntro({
-  daily: (gamePromise ||= import('./game.js')).then((m) => { const d = m.dailyInfo(); return { ...d, color: fragHex(FRAG[d.id]), login: loginState(), rarityCol: Object.fromEntries(RARITIES.map((r) => [r, RARITY[r].col])) }; }),
+  daily: (gamePromise ||= import('./game.js')).then((m) => { const d = m.dailyInfo(); return { ...d, color: fragHex(FRAG[d.id]) }; }),
   notes: INGREDIENTS.map((i) => ({ id: i.id, name: i.name, where: i.country, c: famHex(i.family) })),
   colors: Object.keys(FAMILIES).map(famHex), thumbs: THUMBS,
   onPlay: () => { view.tScale = 1; startPlay(); },
