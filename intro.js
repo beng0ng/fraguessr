@@ -24,6 +24,12 @@ export function initIntro({ daily, notes, colors, thumbs, onPlay }) {
       : d.started ? `${d.got} of ${d.total} notes found so far.`
       : `${d.total} notes to find, five chances.${d.streak > 1 ? ` Keep your ${d.streak}-day streak going.` : ''}`);
     set('cta', d.done ? 'See your result' : d.started ? 'Keep playing' : 'Play');
+    // the login streak and what today's chest holds (streak.js)
+    const L = d.login, st = el.querySelector('[data-in="streak"]');
+    if (L && st) {
+      const what = L.opened ? 'chest opened, see you tomorrow' : `today’s chest: ${L.chest.n} facts, one ${L.chest.best}${L.chest.best === 'legendary' ? '' : ' or better'}`;
+      st.innerHTML = `<i style="--r:${d.rarityCol?.[L.chest.best] || '#f0a81c'}"></i>${L.n > 1 ? `${L.n}-day streak` : 'Day 1'} · ${esc(what)}`; st.hidden = false;
+    }
     if (thumbs) {
       const img = new Image(); img.alt = ''; img.decoding = 'async';
       img.onload = () => card.querySelector('.in-art').replaceChildren(img);

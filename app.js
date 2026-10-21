@@ -21,6 +21,7 @@ import { FACTS, LEGACY_TIER } from './facts.js';
 import { RARITY, RARITIES } from './rarity.js';
 import { letters, cascade, countUp, replay, burst } from './motion.js';
 import { initIntro } from './intro.js';
+import { checkIn, loginState } from './streak.js';
 
 const $ = (s) => document.querySelector(s);
 const ING = Object.fromEntries(INGREDIENTS.map((i) => [i.id, i]));
@@ -1262,7 +1263,29 @@ function loadLab() { try { const l = JSON.parse(localStorage.getItem('noteguessr
 const saveLab = () => { try { localStorage.setItem('noteguessr:lab', JSON.stringify(lab)); } catch {} dirty(); };
 const essence = (id) => Math.max(0, (lab.got[id] || 0) - (lab.used[id] || 0));
 const dropsTotal = () => Object.keys(lab.got).reduce((n, id) => n + essence(id), 0);
-function earn(id, r) { if (!ING[id] || !YIELD[r]) return 0; lab.got[id] = (lab.got[id] || 0) + YIELD[r]; saveLab(); return YIELD[r]; }
+function earn(id, r, k = 1) { if (!ING[id] || !YIELD[r]) return 0; lab.got[id] = (lab.got[id] || 0) + YIELD[r] * k; saveLab(); return YIELD[r] * k; }
+// the daily chest: n facts, about today's notes while they last and then any note, one of them at least as rare as
+// `best`; facts not found yet come first, the rest are drawn at the usual odds, and each pays double essence
+const ALL_IDS = INGREDIENTS.map((i) => i.id).filter((id) => FACTS[id]);
+const shuffled = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+function openChest(ids, n, best) {
+  const out = [], taken = new Set(), mine = shuffled(ids.filter((id) => FACTS[id])), pool = [...mine, ...shuffled(ALL_IDS)];
+  const fresh = (id, r) => FACTS[id]?.[r] && !seenFacts.has(factKey(id, r)) && !taken.has(factKey(id, r));
+  const take = (id, r) => { taken.add(factKey(id, r)); out.push({ id, r }); };
+  const bi = RARITIES.indexOf(best);
+  // the promised one: that rarity, else the nearest rarer, else the nearest commoner
+  for (const r of [...RARITIES.slice(bi), ...RARITIES.slice(0, bi).reverse()]) { const id = pool.find((x) => fresh(x, r)); if (id) { take(id, r); break; } }
+  for (let tries = 0; out.length < n && tries < 60; tries++) {
+    // a different note for each fact while today's notes last
+    const spare = mine.filter((x) => !out.some((o) => o.id === x)), id = spare.length ? spare[0] : mine.length ? mine[tries % mine.length] : pool[tries % pool.length], r = drawFact(id);
+    if (fresh(id, r)) { take(id, r); continue; }
+    const alt = RARITIES.find((x) => fresh(id, x)); if (alt && tries < 30) { take(id, alt); continue; }
+    const other = pool.find((x) => fresh(x, r)); if (other) take(other, r);
+  }
+  // a collection with nothing left to find still gets its chest, as facts already held (they pay their essence)
+  while (out.length < n) { const id = pool[out.length % pool.length]; take(id, drawFact(id)); }
+  return out.map(({ id, r }) => ({ id, r, isNew: discover(id, r), drops: earn(id, r, 2) }));
+}
 // a fragrance's formula: drops of each mapped note (a note listed in two tiers needs both shares)
 function recipe(f) {
   const need = {};
@@ -1621,7 +1644,7 @@ function startPlay(mode) {
   gamePromise.then((m) => m.openGame({
     play, view, flyTo, setZoom, pauseSpin, project, unproject, haversine, midpoint: U3mean, refresh: () => { markerKey = ''; },
     ING, USES, ingHex, ingRgb, fragHex, liquidFor, isDark, esc, setTint, getStage, createVignette, mix, setHash,
-    describe: describeFragrance, facts: { draw: drawFact, discover, earn, mount: mountFact, total: FACT_TOTAL, count: () => seenFacts.size }, notes: { collect: collectNote, count: () => myNotes.size }, milestones: checkMilestones, saved: dirty, nextMilestone: () => { const n = nextMilestone(); return n && { name: n.m.name, goal: n.m.goal, have: n.have, need: n.need, reward: RARITY[n.m.reward].label.toLowerCase() }; },
+    describe: describeFragrance, facts: { draw: drawFact, discover, earn, mount: mountFact, chest: openChest, total: FACT_TOTAL, count: () => seenFacts.size }, notes: { collect: collectNote, count: () => myNotes.size }, milestones: checkMilestones, saved: dirty, nextMilestone: () => { const n = nextMilestone(); return n && { name: n.m.name, goal: n.m.goal, have: n.have, need: n.need, reward: RARITY[n.m.reward].label.toLowerCase() }; },
     collection: () => { setTab('col'); },
     els: { stage, labels: labelsEl, app: $('.app'), panel: $('.panel'), views: $('.views'), list: listEl, detail: detailEl },
     exit: () => { play.active = false; markerKey = ''; setTint(null); $('.app').classList.remove('playing'); $('.panel').classList.remove('playing'); if (tab === 'col') renderList(true); showList(); setHash('atlas'); view.tScale = 1; autoSpin = true; markMode('explore'); },
@@ -1652,10 +1675,11 @@ $('#open-stats').addEventListener('click', withGame((m) => m.openStats()));
 new ResizeObserver(() => { size(); world.resize(); sky.resize(); resizeDots(); globe?.update(globeSize()); }).observe(stage);
 renderList(true);
 initGlobe();
+checkIn();
 // the daily scent is the front door; a shared link to the atlas, an ingredient or a perfume opens the atlas
 // a bare visit opens on the opening page, with the atlas waiting behind it, zoomed out, until a door is picked
 const intro = initIntro({
-  daily: (gamePromise ||= import('./game.js')).then((m) => { const d = m.dailyInfo(); return { ...d, color: fragHex(FRAG[d.id]) }; }),
+  daily: (gamePromise ||= import('./game.js')).then((m) => { const d = m.dailyInfo(); return { ...d, color: fragHex(FRAG[d.id]), login: loginState(), rarityCol: Object.fromEntries(RARITIES.map((r) => [r, RARITY[r].col])) }; }),
   notes: INGREDIENTS.map((i) => ({ id: i.id, name: i.name, where: i.country, c: famHex(i.family) })),
   colors: Object.keys(FAMILIES).map(famHex), thumbs: THUMBS,
   onPlay: () => { view.tScale = 1; startPlay(); },

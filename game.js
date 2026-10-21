@@ -3,6 +3,7 @@
 import { INGREDIENTS, FRAGRANCES, FAMILIES, HOUSES, ALIASES, noteId } from './data.js';
 import { RARITY } from './rarity.js';
 import * as Stats from './stats.js';
+import { LADDER, loginState, markOpened } from './streak.js';
 import { letters, cascade, countUp as countTo, replay, typeOut, burst, ring, mist, flyDrop } from './motion.js';
 
 const ROUNDS = 5, MAX = 5000, TIME = 60, SPEED = 500;
@@ -936,6 +937,7 @@ function scentRender() {
           <div class="g-sc-score"><div class="g-big mono"><b data-n>${got}</b><span>/${total}</span></div><div><h2 class="title">${verdict}</h2><p class="prose">${line}</p></div></div>
           <div class="g-meter"><i style="--p:${got / total}"></i></div>
           ${(() => { const p = scentPoints([...S.found], S.lives, total), best = S.daily ? dailyStats().bestScore : 0; return `<div class="g-sc-pts"><span class="muted">Score</span><b class="mono">${p.total.toLocaleString('en')}</b><span class="muted">${p.bonus ? `incl. ${p.bonus} for drops left` : 'rarer notes score more'}${best > p.total ? ` · best ${best.toLocaleString('en')}` : best && best === p.total && dailyStats().played > 1 ? ' · your best' : ''}</span></div>`; })()}
+          ${S.daily ? chestCard() : ''}
           <div class="g-sc-cta"><button class="btn primary" data-act="scent-share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>Share result</button>${S.daily ? `<button class="btn" data-act="stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</button>` : ''}</div>
           <div class="g-share" hidden><code id="g-sharetext">${A.esc(scentShare())}</code></div>
           ${S.daily && Stats.enabled() ? worldHtml() : ''}
@@ -1096,6 +1098,7 @@ export function openHelp() {
       <li><b>Type a note</b><span>Anything you think is in it: bergamot, rose, vanilla, oud… A right one lights up on the globe where it grows.</span></li>
       <li><b>Rarer notes score more</b><span>A classic like bergamot is worth ${RARE[0][2]}. A note few perfumes use is worth up to ${RARE[3][2]}.</span></li>
       <li><b>Mind your drops</b><span>You have five <i class="sheet-drop">${drop}</i>. A wrong note costs one and unlocks a hint.</span></li>
+      <li><b>Open the daily chest</b><span>Finishing the scent opens a chest of facts. Come back on consecutive days and it grows for a week, up to a legendary.</span></li>
       <li><b>Come back tomorrow</b><span>Everyone gets the same perfume. A new one arrives at midnight UTC.</span></li>
     </ol>
     <button class="btn primary sheet-go" data-sheet="play" autofocus>Play today’s scent</button>
@@ -1143,6 +1146,41 @@ function bonusCard() {
   return `<div class="g-bonus-card"><div><span class="mono">Daily bonus</span><b>Where do they grow?</b><span>${started ? `${b.rounds.length} of ${n} pinned so far.` : `Pin ${n} of today’s notes on the globe. Up to ${max} points, GeoGuessr style.`}</span></div><button class="btn primary" data-act="bonus">${started ? 'Carry on' : 'Play'}</button></div>`;
 }
 
+// ── the daily chest (streak.js): finishing today's scent opens it, and the login streak sets how much is inside ──
+const CHEST = '<svg viewBox="0 0 48 48" aria-hidden="true"><defs><linearGradient id="g-ch-w" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cf8b4c"/><stop offset="1" stop-color="#84501f"/></linearGradient><linearGradient id="g-ch-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe7a0"/><stop offset="1" stop-color="#d49a2c"/></linearGradient></defs><path d="M7 21h34v17a3 3 0 0 1-3 3H10a3 3 0 0 1-3-3z" fill="url(#g-ch-w)"/><path class="g-ch-lid" d="M7 21c0-7.5 5-12.5 17-12.5S41 13.5 41 21z" fill="url(#g-ch-w)"/><path d="M7 20h34v4.5H7z" fill="url(#g-ch-g)"/><path d="M13 10v31M35 10v31" stroke="url(#g-ch-g)" stroke-width="3"/><rect x="20" y="18.5" width="8" height="10.5" rx="2" fill="url(#g-ch-g)" stroke="#8a5a14" stroke-width=".8"/><circle cx="24" cy="23.4" r="1.5" fill="#6b3f12"/><path d="M24 24.5v2.3" stroke="#6b3f12" stroke-width="1.2" stroke-linecap="round"/></svg>';
+const rarer = (r) => `one ${RARITY[r].label.toLowerCase()}${r === 'legendary' ? '' : ' or better'}`;
+function chestCard() {
+  const L = loginState(), got = store.get(`chest:${S.date}`);
+  if (S.date !== L.today) return '';
+  const lead = L.n > 1 ? `${L.n}-day login streak` : 'Day 1 of your login streak';
+  const week = `<div class="g-chest-week" aria-label="Day ${L.rung + 1} of 7 on the chest ladder">${LADDER.map((x, k) => `<i class="${k < L.rung ? 'past' : k === L.rung ? 'now' : ''}" style="--r:${RARITY[x.best].col}" title="Day ${k + 1}: ${x.n} facts, ${rarer(x.best)}"><b>${k + 1}</b></i>`).join('')}</div>`;
+  if (L.opened) return `<div class="g-chest done" style="--r:${RARITY[L.chest.best].col}"><span class="g-chest-ico">${CHEST}</span><div><span class="mono">Daily chest · ${lead}</span><b>${got ? `Opened: ${got.length} facts` : 'Opened today'}</b><span>Come back tomorrow for ${L.tomorrow.n} facts, ${rarer(L.tomorrow.best)}. Miss a day and the streak starts over.</span>${week}</div>${got ? '<button class="btn" data-act="chest-see">See them</button>' : ''}</div>`;
+  return `<div class="g-chest ready" style="--r:${RARITY[L.chest.best].col}"><span class="g-chest-ico">${CHEST}</span><div><span class="mono">Daily chest · ${lead}</span><b>${L.chest.n} facts, ${rarer(L.chest.best)}</b><span>Each day in a row makes it bigger, up to a legendary on day 7.</span>${week}</div><button class="btn primary" data-act="chest">Open</button></div>`;
+}
+function chestOpen() {
+  const L = loginState();
+  if (L.opened || S?.kind !== 'scent' || !S.daily || S.phase !== 'done' || S.date !== L.today) return;
+  const ids = [...S.found, ...S.notes.filter((x) => x.id && !S.found.has(x.id)).map((x) => x.id)];
+  const got = A.facts.chest(ids, L.chest.n, L.chest.best);
+  markOpened(); store.set(`chest:${S.date}`, got); A.saved?.();
+  const card = gameEl.querySelector('.g-chest'); if (card) card.outerHTML = chestCard();
+  chestSheet(got, loginState(), true);
+}
+const BY_RARITY = ['legendary', 'epic', 'rare', 'uncommon', 'common'];
+function chestSheet(got, L, fresh) {
+  const list = got.slice().sort((a, b) => BY_RARITY.indexOf(a.r) - BY_RARITY.indexOf(b.r));
+  const drops = got.reduce((n, x) => n + (x.drops || 0), 0), news = got.filter((x) => x.isNew).length;
+  openSheet(`<div class="chest-head"><span class="g-chest-ico big">${CHEST}</span><div><h2>Daily chest</h2><p class="sheet-lede">${L.n > 1 ? `Day ${L.n} of your login streak` : 'Day 1 of your login streak'}: ${got.length} facts${news === got.length ? '' : `, ${news} new`}, and ${drops} drops of essence for the lab.</p></div></div>
+    <div class="chest-row">${list.map((x, k) => `<button type="button" class="badge note chest-chip${k ? '' : ' on'}" data-chest="${k}" style="--r:${RARITY[x.r].col}"><span class="fc-pips">${'<i></i>'.repeat(RARITY[x.r].pips)}</span>${A.esc(A.ING[x.id].name)}${x.isNew ? '<em>New</em>' : ''}</button>`).join('')}</div>
+    <div class="chest-slot"></div>
+    <button class="btn sheet-go" data-sheet="close">Back to today’s scent</button>`, 'chest-sheet');
+  const slot = sheet.querySelector('.chest-slot');
+  const show = (k) => { const x = list[k]; A.facts.mount(slot, x.id, x.r, { isNew: x.isNew }); sheet.querySelectorAll('.chest-chip').forEach((c, j) => { c.classList.toggle('on', j === k); c.setAttribute('aria-pressed', String(j === k)); }); };
+  sheet.querySelectorAll('.chest-chip').forEach((c) => c.addEventListener('click', () => show(Number(c.dataset.chest))));
+  show(0);
+  if (fresh) { cascade(sheet.querySelectorAll('.chest-chip'), { cls: 'mv-pop', step: 90, delay: 250 }); setTimeout(() => burst(sheet.querySelector('.g-chest-ico'), RARITY[list[0].r].col, { n: 26, spread: 90, stars: 9 }), 200); }
+}
+
 // back to today's scent from anywhere in the game
 export function showDaily() {
   if (!A) return;
@@ -1183,6 +1221,8 @@ function onPanelClick(e) {
   else if (act === 'start') start();
   else if (act === 'scent') scentOpen(true);
   else if (act === 'bonus') startBonus();
+  else if (act === 'chest') chestOpen();
+  else if (act === 'chest-see') { const got = store.get(`chest:${S.date}`); if (got) chestSheet(got, loginState(), false); }
   else if (act === 'games') { S = null; lobby(); }
   else if (act === 'stats') openStats();
   else if (act === 'scent-guess') scentGuess(gameEl.querySelector('[data-sc-in]')?.value || '');

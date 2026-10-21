@@ -8,11 +8,15 @@ import { RARITY } from './rarity.js';
 import { burst, cascade, calm } from './motion.js';
 import { skyStats } from './flyby.js';
 
+// a win pays one fact, a notch below what the same rarity of catch would suggest (the daily chest is the big one):
+// easy pays common (sometimes uncommon), medium uncommon (sometimes rare), hard rare (sometimes epic),
+// legendary epic (sometimes legendary)
+const up = (p, a, b) => (Math.random() < p ? [b, a] : [a, b]);
 const LEVELS = {
-  easy: { k: 0, label: 'Easy', n: 1, opts: 3, secs: 0, prize: () => (Math.random() < 0.5 ? ['uncommon', 'common'] : ['common', 'uncommon']), says: 'a common or uncommon fact' },
-  medium: { k: 1, label: 'Medium', n: 2, opts: 4, secs: 0, prize: () => ['rare', 'uncommon', 'common'], says: 'a rare fact' },
-  hard: { k: 2, label: 'Hard', n: 3, opts: 4, secs: 20, prize: () => ['epic', 'rare', 'uncommon', 'common'], says: 'an epic fact' },
-  legendary: { k: 3, label: 'Legendary', n: 3, opts: 4, secs: 15, prize: () => ['legendary', 'epic', 'rare', 'uncommon', 'common'], says: 'a legendary fact' },
+  easy: { k: 0, label: 'Easy', n: 1, opts: 3, secs: 0, prize: () => [...up(0.25, 'common', 'uncommon')], says: 'a common fact, sometimes uncommon' },
+  medium: { k: 1, label: 'Medium', n: 2, opts: 4, secs: 0, prize: () => [...up(0.25, 'uncommon', 'rare'), 'common'], says: 'an uncommon fact, sometimes rare' },
+  hard: { k: 2, label: 'Hard', n: 3, opts: 4, secs: 20, prize: () => [...up(0.25, 'rare', 'epic'), 'uncommon', 'common'], says: 'a rare fact, sometimes epic' },
+  legendary: { k: 3, label: 'Legendary', n: 3, opts: 4, secs: 15, prize: () => [...up(0.35, 'epic', 'legendary'), 'rare', 'uncommon', 'common'], says: 'an epic fact, sometimes legendary' },
 };
 // `from` is the easiest level a category turns up at
 const CATS = {

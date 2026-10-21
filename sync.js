@@ -12,10 +12,10 @@ const recent = (days) => Object.fromEntries(Object.keys(days).sort().slice(-KEEP
 function local() {
   const days = {};
   for (let i = 0; i < localStorage.length; i++) { const m = localStorage.key(i)?.match(DAY); if (m) try { days[m[1]] = JSON.parse(localStorage.getItem(m[0])); } catch {} }
-  return { facts: [...new Set(read('facts', []))].sort(), notes: read('notes', {}), miles: read('miles', {}), stats: read('stats', {}), streak: read('scent:streak', null), days: recent(days), lab: labOf(read('lab', {})) };
+  return { facts: [...new Set(read('facts', []))].sort(), notes: read('notes', {}), miles: read('miles', {}), stats: read('stats', {}), streak: read('scent:streak', null), login: read('login', null), days: recent(days), lab: labOf(read('lab', {})) };
 }
 const labOf = (l) => ({ got: l?.got || {}, used: l?.used || {}, made: l?.made || {} });
-const pick = (d = {}) => ({ facts: d.facts || [], notes: d.notes || {}, miles: d.miles || {}, stats: d.stats || {}, streak: d.streak || null, days: d.days || {}, lab: labOf(d.lab) });
+const pick = (d = {}) => ({ facts: d.facts || [], notes: d.notes || {}, miles: d.miles || {}, stats: d.stats || {}, streak: d.streak || null, login: d.login || null, days: d.days || {}, lab: labOf(d.lab) });
 // the lab's drops earned, drops spent and perfumes blended are running totals, so the larger of each wins
 const maxOf = (a, b) => { const o = { ...a }; for (const [k, n] of Object.entries(b)) if (typeof n === 'number') o[k] = Math.max(o[k] || 0, n); return o; };
 
@@ -27,14 +27,18 @@ function merge(a, b) {
   const miles = { ...b.miles, ...a.miles }; for (const [k, m] of Object.entries(b.miles)) if (a.miles[k] && m.at < a.miles[k].at) miles[k] = m;
   const stats = { ...a.stats }; for (const [k, v] of Object.entries(b.stats)) if (typeof v === 'number') stats[k] = Math.max(stats[k] || 0, v);
   const sa = a.streak, sb = b.streak, streak = !sa ? sb : !sb ? sa : sa.last !== sb.last ? (sa.last > sb.last ? sa : sb) : sa.n >= sb.n ? sa : sb;
+  // the login streak: the later visit wins (the longer streak on the same day), keeping the best and the latest chest
+  const la = a.login, lb = b.login, lw = !la ? lb : !lb ? la : la.last !== lb.last ? (la.last > lb.last ? la : lb) : la.n >= lb.n ? la : lb;
+  const login = lw && { ...lw, best: Math.max(la?.best || 0, lb?.best || 0), chest: [la?.chest, lb?.chest].filter(Boolean).sort().pop() || null };
   const days = { ...a.days };
   for (const [d, v] of Object.entries(b.days)) { const cur = days[d]; if (!cur || (v.over && !cur.over) || (!!v.over === !!cur.over && (v.log?.length || 0) > (cur.log?.length || 0))) days[d] = v; }
   const lab = { got: maxOf(a.lab.got, b.lab.got), used: maxOf(a.lab.used, b.lab.used), made: maxOf(a.lab.made, b.lab.made) };
-  return { facts, notes, miles, stats, streak, days: recent(days), lab };
+  return { facts, notes, miles, stats, streak, login, days: recent(days), lab };
 }
 function apply(s) {
   write('facts', s.facts); write('notes', s.notes); write('miles', s.miles); write('stats', s.stats);
   if (s.streak) write('scent:streak', s.streak);
+  if (s.login) write('login', s.login);
   write('lab', s.lab);
   for (const [d, v] of Object.entries(s.days)) write('scent:' + d, v);
 }
