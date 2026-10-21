@@ -846,6 +846,16 @@ if (new URLSearchParams(location.search).has('prerender')) {
     // the daily bottles, larger and on a clear background so they sit on either theme
     ...(keys.includes('h') ? [import('./game.js').then((g) => Promise.all(g.scentPoolIds().map((id) => m.thumbnail(`h:${id}`, m.thumbBuilders.fragrance(FRAG[id], liquidFor(FRAG[id]), fragHex(FRAG[id])), null, { size: 480 }))))] : []),
   ]).then(() => m.renderedThumbs));
+  // the detail heroes' first frames, at 864×600 (a little wider than any hero, twice its height), for the placeholders
+  window.prerenderStills = async (kind, from = 0, to = 1e9) => {
+    const st = await getStage(), box = document.createElement('div'), out = [];
+    box.style.cssText = 'position:fixed;left:0;top:0;width:864px;height:600px;z-index:99'; document.body.append(box); st.mount(box);
+    for (const x of (kind === 'i' ? INGREDIENTS : FRAGRANCES).slice(from, to)) {
+      await showModel(st, kind === 'i' ? 'ing' : 'frag', kind === 'i' ? { ing: x } : { f: x, liquid: liquidFor(x) });
+      out.push([`s:${kind}-${x.id}:${isDark() ? 'd' : 'l'}`, st.snapshot(kind === 'i' ? 'image/png' : 'image/jpeg', 0.95)]);
+    }
+    return out;
+  };
 }
 
 // category bar: jump + scrollspy
@@ -932,28 +942,39 @@ function heroFor(kind, el, payload) {
   const cv = el.querySelector('canvas.vignette');
   if (cv) vignette = createVignette(cv, payload.vig);
   const host = el.querySelector('.model');
-  // on the public site a ready-made picture shows at once; the 3D model is built once the panel has slid in
+  // on the public site a ready-made picture of the model's first frame shows at once, so nothing changes when the
+  // live model takes over; it is built once the globe has finished flying, while nothing else is moving
   if (THUMBS) {
-    const img = new Image(); img.className = 'hero-ph'; img.alt = ''; img.decoding = 'async';
-    img.src = `${THUMBS}${kind === 'ing' ? `i-${payload.ing.id}` : `f-${payload.f.id}-${isDark() ? 'd' : 'l'}`}.webp`;
+    const img = new Image(), id = kind === 'ing' ? `i-${payload.ing.id}` : `f-${payload.f.id}`, th = isDark() ? 'd' : 'l';
+    img.className = 'hero-ph still'; img.alt = ''; img.decoding = 'async';
+    img.onerror = () => { img.onerror = null; img.className = 'hero-ph'; img.src = `${THUMBS}${kind === 'ing' ? id : `${id}-${th}`}.webp`; };
+    img.src = `${THUMBS}s-${id}-${th}.webp`;
     host.append(img);
   }
-  const later = (fn) => (modelStage ? setTimeout(fn, 160) : window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 700 }) : setTimeout(fn, 450));
+  const later = (fn) => {
+    if (!modelStage) return window.requestIdleCallback ? requestIdleCallback(fn, { timeout: 700 }) : setTimeout(fn, 450);
+    const t0 = performance.now();
+    const wait = () => (view.tPhi == null && Math.abs(view.tScale - view.scale) < 0.02) || performance.now() - t0 > 1400 ? setTimeout(fn, 0) : requestAnimationFrame(wait);
+    setTimeout(wait, 160);
+  };
   later(() => getStage().then((st) => {
     if (!host.isConnected || detailEl.classList.contains('off-right')) return;
     if (!st) { el.classList.add('no-3d'); return; }
     st.mount(host);
-    const dark = isDark();
-    if (kind === 'ing') {
-      const ing = payload.ing;
-      st.showIngredient(ing, ingHex(ing), dark ? mix(ingHex(ing), '#2a2a2e', 0.78) : mix(ingHex(ing), '#ffffff', 0.82));
-    } else {
-      const f = payload.f, sig = fragHex(f);
-      const notes = f.ingredients.slice().sort((a, b) => vividness(ING_COLOR[b]) - vividness(ING_COLOR[a])).slice(0, 3).map((id) => ING[id]);
-      st.showFragrance(f, payload.liquid, notes, dark ? mix(sig, '#332c27', 0.8) : mix(sig, '#ffffff', 0.88), sig, sweepFor(sig));
-    }
+    if (host.querySelector('.hero-ph.still')) st.holdNext(700);
+    showModel(st, kind, payload);
     st.ready().then(() => { if (host.isConnected) requestAnimationFrame(() => el.classList.add('loaded')); });
   }));
+}
+function showModel(st, kind, payload) {
+  const dark = isDark();
+  if (kind === 'ing') {
+    const ing = payload.ing;
+    return st.showIngredient(ing, ingHex(ing), dark ? mix(ingHex(ing), '#2a2a2e', 0.78) : mix(ingHex(ing), '#ffffff', 0.82));
+  }
+  const f = payload.f, sig = fragHex(f);
+  const notes = f.ingredients.slice().sort((a, b) => vividness(ING_COLOR[b]) - vividness(ING_COLOR[a])).slice(0, 3).map((id) => ING[id]);
+  return st.showFragrance(f, payload.liquid, notes, dark ? mix(sig, '#332c27', 0.8) : mix(sig, '#ffffff', 0.88), sig, sweepFor(sig));
 }
 
 // ── selection tint: page accent, stage wash and globe glow follow the ingredient ──

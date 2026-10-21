@@ -1385,26 +1385,47 @@ export function createModelStage() {
   const { scene, backdrop } = buildScene(renderer);
   const camera = new THREE.PerspectiveCamera(22, 1, 0.05, 80);
   const turntable = new THREE.Group(); scene.add(turntable);
-  let host = null, parked = false, raf = 0, tick = 0, lastT = 0, shownAt = 0, dirty = true, rotY = 0, velY = 0, dragging = false, lastX = 0, onScreen = true, aspect = 1, current = null;
+  let host = null, parked = false, holdMs = 0, holdUntil = 0, raf = 0, tick = 0, lastT = 0, shownAt = 0, dirty = true, rotY = 0, velY = 0, dragging = false, lastX = 0, onScreen = true, aspect = 1, current = null;
   const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const io = new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; });
 
   // shaders compile in the background (KHR_parallel_shader_compile where the browser has it), so picking a new
   // model doesn't freeze the page; nothing is drawn until they are ready and the canvas stays clear meanwhile
   let ready = Promise.resolve(), live = true;
+  // glass and liquids go through a transmission pass that first redraws everything opaque into a linear render target
+  // (back faces of two-sided glass too); those shader variants would otherwise compile on the first frame and stall it,
+  // so they are started here alongside the normal ones, and the model waits until every one has finished
+  const warmRT = new THREE.WebGLRenderTarget(1, 1);
+  function compileAll(group) {
+    if (!renderer.compileAsync) return Promise.resolve();
+    let glass = false; const backs = [];
+    group.traverse((o) => { if (o.isMesh) for (const m of [].concat(o.material)) if (m?.transmission > 0) { glass = true; if (m.side === THREE.DoubleSide) backs.push(m); } });
+    if (glass) {
+      renderer.setRenderTarget(warmRT); renderer.compile(scene, camera);
+      if (backs.length) { backs.forEach((m) => { m.side = THREE.BackSide; }); renderer.compile(scene, camera); backs.forEach((m) => { m.side = THREE.DoubleSide; m.needsUpdate = true; }); }
+      renderer.setRenderTarget(null);
+    }
+    return renderer.compileAsync(scene, camera).then(() => new Promise((res) => {
+      const check = () => (renderer.info.programs.every((p) => !p.isReady || p.isReady()) ? res() : setTimeout(check, 10));
+      check();
+    }));
+  }
   function show(group) {
     if (current) { turntable.remove(current); dispose(current); }
     current = group; turntable.add(group);
     turntable.rotation.y = rotY = -0.35; velY = 1.6; shownAt = performance.now(); dirty = true;
     frame(turntable, camera, aspect);
     live = false; renderer.setRenderTarget(null); renderer.clear();
-    const done = () => { if (current !== group) return; live = true; dirty = true; shownAt = performance.now(); };
-    ready = (renderer.compileAsync ? renderer.compileAsync(scene, camera) : Promise.resolve()).then(done, done);
+    const hold = holdMs; holdMs = 0;
+    const done = () => { if (current !== group) return; live = true; dirty = true; shownAt = lastT = performance.now(); holdUntil = shownAt + hold; shownAt += hold; };
+    ready = compileAll(group).then(done, done);
     return ready;
   }
   function loop() {
     raf = requestAnimationFrame(loop);
     if (!host || parked || !onScreen || document.hidden || !live) return;
+    // held still at first (while a picture of this same frame fades away above it), unless it is dragged
+    if (!dragging && performance.now() < holdUntil) { lastT = performance.now(); if (dirty) { dirty = false; turntable.rotation.y = rotY; renderer.render(scene, camera); } return; }
     // after each pick the turntable turns slowly for a while, then comes to rest and stops redrawing until it is dragged
     const now = performance.now(), dt = Math.min(0.25, (now - lastT) / 1000); lastT = now;
     const cruise = reduce || now - shownAt > 6000 ? 0 : 0.22;
@@ -1432,6 +1453,10 @@ export function createModelStage() {
     ready: () => ready,
     // the detail panel slid away: stop drawing until the next model is mounted
     pause() { parked = true; },
+    // keep the next model at its first pose for this long once it appears
+    holdNext(ms) { holdMs = ms; },
+    // build tooling: the model's first frame as a picture, saved as the placeholder shown while the live model loads
+    snapshot(type = 'image/png', q) { turntable.rotation.y = -0.35; renderer.render(scene, camera); return canvas.toDataURL(type, q); },
   };
 }
 

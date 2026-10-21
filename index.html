@@ -1443,6 +1443,9 @@ body { font-variant-numeric: lining-nums; }
 
 /* v43: long lists only lay out and paint the rows on screen */
 .list.frag .row { content-visibility: auto; contain-intrinsic-size: auto 44px; }
+/* v44: the placeholder is the model's own first frame, so the live model appears under it and it fades away on top */
+.hero .hero-ph.still { left: 0; top: 0; width: 100%; height: 100%; aspect-ratio: auto; object-fit: cover; transform: none; -webkit-mask-image: none; mask-image: none; transition: opacity .45s var(--ease); }
+.hero .model:has(.still) .bottle-canvas { transition: none; transform: none; }
 </style>
 
 </head>
