@@ -169,6 +169,9 @@ export function createFlybys({ stage, isDark, reduce, allowed, onCatch }) {
         else if (f.move === 'drift') rot = Math.sin(u * 4 + seed) * 6;
         else if (f.move === 'sway' || f.move === 'rise') rot = Math.sin(u * 9 + seed) * (f.move === 'sway' ? 12 : 4);
         const flip = face && back ? ` rotate(${rot - 180}deg) scaleX(-1)` : ` rotate(${rot}deg)`;
+        // the 3D model banks into turns and sheds its trail at the speed it is going
+        if (me.gl) { const dt = Math.max(1, t - (me.lt || t - 16)) / 1000, turn = me.lr == null ? 0 : (((rot - me.lr + 540) % 360) - 180) / dt; me.lr = rot; me.lt = t;
+          me.turnS = (me.turnS || 0) * 0.85 + (face ? (back ? -turn : turn) : 0) * 0.15; me.gl.motion = { turn: me.turnS, speed: len / dur * 1000, dir: face ? 1 : ltr ? 1 : -1 }; }
         el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)${flip}`; tipAt(x, y);
         // a trail of sparks in its colour, shed from the head
         if (t - me.spark > 55 && layer.childElementCount < 40) {
@@ -205,6 +208,8 @@ export function createFlybys({ stage, isDark, reduce, allowed, onCatch }) {
   // the daily game, a sheet or the opening page takes over: whatever is passing leaves at once
   function clear() { if (cur && !cur.caught) end(cur); }
 
+  // the 3D models load in the background once the page has settled, so the first one shows in full straight away
+  setTimeout(() => (window.requestIdleCallback || setTimeout)(() => import('./flyers3d.js').catch(() => {})), 6000);
   // ?flyby=<id> sends one by as soon as the atlas is showing (used to check each one)
   const want = new URLSearchParams(location.search).get('flyby');
   if (want && FLYERS[want]) { const t = setInterval(() => { if (spawn(want)) clearInterval(t); }, 500); }

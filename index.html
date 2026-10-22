@@ -32,7 +32,7 @@
 <title>Fraguessr: the daily perfume guessing game</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Manrope:wght@400;500;600;700&family=Geist:wght@600&family=Geist+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500&family=Marcellus&family=Manrope:wght@400;500;600;700&family=Geist:wght@600&family=Geist+Mono:wght@400;500&display=swap">
 <script type="importmap">
 { "imports": {
   "cobe": "https://cdn.jsdelivr.net/npm/cobe@2.0.1/dist/index.esm.js",
@@ -78,6 +78,7 @@ if (location.hash.length < 2 && !/[?&]prerender/.test(location.search)) {
   --radius: 10px;
   --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-ui: "Marcellus", "Optima", "Candara", "Palatino Linotype", Georgia, serif; /* tabs and filters: a carved, Roman-capital face, like a perfume house's sign */
   --font-display: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, serif; /* names of perfumes and notes, like a label */
   --ease: cubic-bezier(.22, 1, .36, 1);
   --spring: cubic-bezier(.34, 1.56, .64, 1);
@@ -1900,7 +1901,7 @@ details.lab-card[open]::details-content { height: auto; }
 /* v51: the sky objects as 3D models (flyers3d.js) over their flat art */
 .fb-art .fb-gl { pointer-events: none; animation: wfade .45s ease both; }
 .fb-3d > svg { opacity: 0; transition: opacity .45s ease; }
-.fb-3d-head > svg circle { opacity: 0; transition: opacity .45s ease; }
+.fb-3d-head > svg { opacity: 0; transition: opacity .45s ease; }
 .flyby[data-sky="night"] .fb-art.fb-3d, .flyby[data-sky="night"] .fb-art.fb-3d-head { filter: drop-shadow(0 0 9px rgba(200, 225, 255, .35)); }
 .flyby[data-sky="day"] .fb-art.fb-3d { filter: drop-shadow(0 8px 10px rgba(70, 55, 40, .22)); }
 .flyby.fb-gold .fb-art.fb-3d, .flyby.fb-gold .fb-art.fb-3d-head { filter: drop-shadow(0 0 12px rgba(255, 200, 80, .7)); }
@@ -1911,6 +1912,16 @@ details.lab-card[open]::details-content { height: auto; }
 @keyframes scSpot { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--c, var(--accent)) 14%, transparent); } }
 .g-sc-hint.clued { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
 @media (prefers-reduced-motion: reduce) { .g-sc-n.hidden.clued { animation: none; } }
+
+/* v53: the tabs read like a perfume house's signage: a carved Roman face, fragrance names (Daily Scent, Scent Atlas) */
+.modes button, .col-tab span, .tab, .regions .btn, .cb, .seg button, .lb-chest .lb-t, .chest-kicker { font-family: var(--font-ui); font-weight: 400; letter-spacing: .02em; }
+.modes button { font-size: 15px; padding: 0 18px 0 13px; }
+.col-tab span { font-size: 15px; }
+.tab { font-size: 14.5px; }
+.tab .mono, .col-tab b { font-family: var(--font-mono); letter-spacing: 0; }
+.cb { font-size: 13px; }
+.regions .btn { font-size: 13px; }
+@media (max-width: 560px) { .modes .mx { display: none; } .modes button { font-size: 14.5px; padding: 0 13px 0 10px; } }
 </style>
 
 <div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="in-word">
@@ -1949,8 +1960,8 @@ details.lab-card[open]::details-content { height: auto; }
     </div>
     <nav class="modes" data-mode="play" role="tablist" aria-label="Mode">
       <i class="modes-pill" aria-hidden="true"></i>
-      <button role="tab" id="play" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Daily</span><b class="modes-live" aria-hidden="true"></b></button>
-      <button role="tab" id="m-explore" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg><span>Explore</span></button>
+      <button role="tab" id="play" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2.5h5v3h-5zM10.5 5.5v2.2M13.5 5.5v2.2"/><rect x="5" y="7.7" width="14" height="13.8" rx="3.2"/><path d="M8.5 14.5c1.2-1 2.4-1 3.5 0s2.3 1 3.5 0"/></svg><span>Daily <span class="mx">Scent</span></span><b class="modes-live" aria-hidden="true"></b></button>
+      <button role="tab" id="m-explore" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3.5 9.5h17M3.5 14.5h17M12 3c-2.6 2.6-3.6 5.6-3.6 9s1 6.4 3.6 9M12 3c2.6 2.6 3.6 5.6 3.6 9s-1 6.4-3.6 9"/></svg><span><span class="mx">Scent </span>Atlas</span></button>
     </nav>
     <div class="top-end">
     <div class="spacer"></div>
