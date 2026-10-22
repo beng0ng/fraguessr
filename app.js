@@ -40,7 +40,7 @@ const cn="https://cdn.jsdelivr.net/npm/cobe@2.0.1/dist/index.esm.js";let dn=null
       <div class="detail-top"><button class="btn icon ghost" data-back aria-label="Back to list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
         <div class="crumbs"><span>Ingredients</span><span>/</span><b>${h(s.name)}</b></div></div>
       <div class="hero" id="hero"><canvas class="vignette"></canvas><div class="fade"></div><div class="model"></div>
-        <span class="badge glass tag mono">${h(s.place)}</span><span class="badge glass tag2 mono">Drag to turn</span></div>
+        <span class="badge glass tag mono">${h(s.place)}</span></div>
       <div class="body">
         <div><h2 class="title">${h(s.name)}</h2><div class="latin">${h(s.latin)}</div></div>
         <div class="badges"><span class="badge"><span class="dot" style="background:${ee(s.family)}"></span>${i.label}</span><span class="badge soft">${h(s.country)}</span><span class="badge palette" title="Color palette">${s.c.map(c=>`<span class="dot" style="background:${c};box-shadow:0 0 0 1px rgba(0,0,0,.12)"></span>`).join("")}</span>${s.molecule?'<span class="badge accent">Aroma molecule</span>':s.accord?'<span class="badge accent">Accord in perfume</span>':'<span class="badge soft">Natural extract</span>'}</div>
@@ -60,9 +60,9 @@ const cn="https://cdn.jsdelivr.net/npm/cobe@2.0.1/dist/index.esm.js";let dn=null
     <div class="detail">
       <div class="detail-top"><button class="btn icon ghost" data-back aria-label="Back to list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
         <div class="crumbs"><span>Fragrances</span><span>/</span><b>${h(t.name)}</b></div></div>
-      <div class="hero frag" id="hero" style="--liquid:${n};--sig:${J(t)}"><div class="model"></div><span class="badge glass tag mono">Drag to turn</span></div>
+      <div class="hero frag" id="hero" style="--liquid:${n};--sig:${J(t)}"><div class="model"></div></div>
       <div class="body">
-        <div><h2 class="title">${h(t.name)}</h2><div class="latin" style="font-style:normal">${h(t.house)} · ${t.year} · ${h(t.perfumer)}</div></div>
+        <div><h2 class="title">${h(t.name)}</h2><div class="latin" style="font-style:normal">${h(t.house)} · ${t.year}${t.perfumer&&t.perfumer!==t.house?` · ${h(t.perfumer)}`:""}</div></div>
         <div class="badges"><span class="badge" style="text-transform:capitalize">${h(o)}</span><span class="badge soft">${h(t.audience)}</span><span class="badge soft">${t.ingredients.length} mapped origins</span></div>
         <p class="prose">${h(r)}</p>
         <div class="stat-row">
