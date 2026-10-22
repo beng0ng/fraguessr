@@ -1,1947 +1,251 @@
-// Fraguessr: a GeoGuessr-style game on the atlas globe. You're shown an ingredient (or a perfume and one
-// of its notes) and drop a pin where you think it is grown. Five rounds, up to 5,000 points each.
-import { INGREDIENTS, FRAGRANCES, FAMILIES, HOUSES, ALIASES, noteId } from './data.js';
-import { RARITY } from './rarity.js';
-import * as Stats from './stats.js';
-import { LADDER, CHEST, rarer, loginState, markOpened } from './streak.js';
-import { letters, cascade, countUp as countTo, replay, typeOut, burst, ring, mist, flyDrop } from './motion.js';
-
-const ROUNDS = 5, MAX = 5000, TIME = 60, SPEED = 500;
-const MODES = {
-  notes: { label: 'Notes', blurb: 'See an ingredient, find where it grows.', icon: '<path d="M12 3c3 4 5 6.5 5 9.5a5 5 0 0 1-10 0C7 9.5 9 7 12 3z"/>' },
-  perfumes: { label: 'Perfumes', blurb: 'A famous perfume and one of its notes. Where does that note come from?', icon: '<rect x="7" y="9" width="10" height="12" rx="2"/><path d="M10 9V6h4v3M9 3h6"/>' },
-  blind: { label: 'Blind nose', blurb: 'No name. Just the material, its clues and your instinct.', icon: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><path d="M4 4l16 16"/>' },
-};
-const CLUE_COST = 0.15;
-
-function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
-function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
-const today = () => new Date().toISOString().slice(0, 10);
-const store = {
-  get(k) { try { return JSON.parse(localStorage.getItem('noteguessr:' + k)); } catch { return null; } },
-  set(k, v) { try { localStorage.setItem('noteguessr:' + k, JSON.stringify(v)); } catch {} },
-};
-// distance points: a full 5,000 within 50 km, then a smooth falloff (about 3,100 at 1,000 km, 1,200 at 3,000 km)
-export const scoreFor = (km) => (km == null ? 0 : km <= 50 ? MAX : Math.round(MAX * Math.exp(-(km - 50) / 2000)));
-// the whole round: distance points, minus 15% of them per paid hint, plus a speed bonus on the clock
-// (only for guesses that were at least in the right part of the world, so a fast random tap earns nothing extra)
-function scoreRound({ km, clues, free, timed, left, time }) {
-  const distance = scoreFor(km), paid = Math.max(0, clues - free);
-  const hints = Math.round(distance * CLUE_COST * paid);
-  const speed = timed && km != null && distance >= 1000 ? Math.round(SPEED * Math.max(0, left) / time) : 0;
-  return { distance, paid, hints, speed, points: distance - hints + speed };
-}
-const TIERS = [[50, 'Bullseye', '#4f8f63'], [300, 'Right on the doorstep', '#4f8f63'], [1000, 'Very close', '#46a758'], [2500, 'Right region', '#e2a336'], [5000, 'Same side of the world', '#f76b15'], [Infinity, 'A long way off', '#c4513f']];
-const tierOf = (km) => (km == null ? ['', 'Out of time', '#c4513f'] : TIERS.find(([d]) => km < d));
-const kmText = (km) => (km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km).toLocaleString()} km`);
-
-const REGION = {
-  'Europe': ['Bulgaria', 'France', 'Italy', 'Switzerland', 'Ukraine', 'Russia', 'Spain', 'Bosnia and Herzegovina', 'Greece', 'North Macedonia', 'Croatia', 'Serbia', 'Netherlands', 'Ireland', 'United Kingdom', 'Finland', 'Hungary', 'Romania', 'Poland', 'Norway', 'Sweden', 'Germany', 'Austria', 'Czechia', 'Portugal'],
-  'Southern Europe or Anatolia': ['Turkey'],
-  'the Caucasus': ['Georgia'],
-  'North Africa': ['Morocco', 'Tunisia', 'Egypt'],
-  'West Africa': ['Ghana', 'Nigeria', 'Guinea', 'Senegal', 'Ivory Coast'],
-  'the Sahel': ['Sudan', 'Burkina Faso'],
-  'Central Africa': ['Gabon', 'Cameroon'],
-  'the Horn of Africa': ['Ethiopia', 'Somaliland'],
-  'East or Southern Africa': ['Tanzania', 'South Africa', 'Namibia'],
-  'an island in the Indian Ocean, off Africa': ['Madagascar', 'Comoros', 'Réunion'],
-  'the Middle East': ['Yemen', 'Iran', 'Oman', 'Saudi Arabia', 'Israel', 'Lebanon'],
-  'Central Asia': ['Kazakhstan', 'Kyrgyzstan', 'Uzbekistan', 'Tajikistan'],
-  'South Asia': ['India', 'Sri Lanka', 'Nepal', 'Bangladesh', 'Bhutan'],
-  'East Asia': ['China', 'Japan', 'South Korea', 'Taiwan', 'Mongolia'],
-  'Southeast Asia': ['Philippines', 'Indonesia', 'Laos', 'Vietnam', 'Malaysia', 'Thailand', 'Myanmar'],
-  'North America': ['United States', 'Canada'],
-  'Central America or the Caribbean': ['Mexico', 'Cuba', 'Haiti', 'El Salvador', 'Guatemala', 'Costa Rica', 'Jamaica', 'Martinique', 'Dominica', 'Bahamas', 'Belize', 'Honduras', 'Grenada'],
-  'South America': ['Brazil', 'Venezuela', 'Paraguay', 'Peru', 'Colombia', 'Ecuador', 'Argentina', 'Bolivia', 'Chile'],
-  'Oceania': ['New Zealand', 'Australia', 'French Polynesia', 'Papua New Guinea', 'Vanuatu'],
-};
-export function region(loc, country) {
-  if (country === 'United States' && loc[1] < -150 && loc[0] < 30) return 'Oceania'; // Hawaii
-  for (const [r, list] of Object.entries(REGION)) if (list.includes(country)) return r;
-  return loc[1] < -30 ? 'the Americas' : loc[0] > 35 ? 'the northern hemisphere' : 'the tropics';
-}
-// place names and their adjectives, so the field notes don't give the answer away
-const GEO = ['Ceylon', 'Bourbon', 'Persia', 'Arabia', 'Levant', 'Balkan', 'Himalaya', 'Amazon', 'Andes', 'Andean', 'Caribbean', 'Sahara', 'Africa', 'Asia', 'Europe', 'America', 'Mediterranean', 'Orient',
-  'French', 'Dutch', 'Spanish', 'Greek', 'Turkish', 'Swiss', 'Chinese', 'Japanese', 'Javanese', 'Malagasy', 'Thai', 'Lao', 'Somali', 'Yemeni', 'Omani', 'Peruvian', 'Haitian', 'Grasse', 'Provence', 'Calabria', 'Sicily', 'Tuscany', 'Florence', 'Kazanlak', 'Isparta', 'Mysore', 'Tamil', 'Kerala', 'Zanzibar', 'Java', 'Sumatra', 'Bali', 'Ghana', 'Tahiti', 'Polynesia', 'Polynesian', 'Hawaii', 'Chios', 'Martinique', 'Jamaica', 'Jamaican', 'Irish', 'Connemara', 'Quebec', 'Canadian', 'Australian', 'Colombian', 'Ecuadorian', 'Vietnamese', 'Mekong', 'Iranian', 'Sichuan', 'Szechuan', 'Kiso', 'Agen', 'Giresun', 'Bogotá', 'Ratnagiri', 'Alphonso', 'Bahia', 'Michoacán', 'Mexico', 'Mexican', 'Brazil', 'Comoros', 'Mayotte', 'Nosy', 'Réunion', 'Morocc', 'Egypt', 'Tunisia', 'India', 'Italian', 'Bulgaria', 'Russia', 'Siberia', 'Iran', 'Iraq', 'Oman', 'Dhofar', 'Somaliland', 'Ethiopia', 'Sri Lanka', 'Lankan', 'Vietnam', 'Indonesia', 'Philippin', 'Madagascar', 'Venezuel', 'Paraguay', 'Guatemala', 'Salvador', 'Haiti', 'Serbia', 'Bosnia', 'Croatia', 'Macedonia', 'Ukrain', 'Kazakh', 'Texas', 'Virginia', 'California', 'Florida', 'Nigeria', 'Cuba', 'Costa Rica', 'Spain', 'Portug', 'Atlas', 'Rif',
-  'Corsica', 'Corsican', 'Scotland', 'Scottish', 'Islay', 'Yorkshire', 'Tasmania', 'Tasmanian', 'Nepal', 'Nepalese', 'Dominica', 'Guinea', 'Fouta', 'Bahamas', 'Eleuthera', 'Cognac', 'Alba', 'Piedmont', 'Périgord', 'Cavaillon', 'Malatya', 'Niort', 'Poitevin', 'Ardèche', 'Misiones', 'Argentin', 'Finland', 'Finnish', 'Saudi', 'Ahsa', 'Kashmir', 'Limousin', 'Crete', 'Cretan', 'Andalusia', 'Erode', 'Cederberg', 'Cape', 'Hungar', 'Henan', 'Jimma', 'Madhya', 'Loire',
-  'English', 'England', 'Britain', 'British', 'Galilee', 'Polish', 'Burm', 'Bengal', 'Malay', 'Ipoh', 'Maya', 'Honshu', 'Aegean', 'Korean',
-  'Bangkok', 'Ottoman', 'Kyrgyz', 'Hejaz', 'Mecca', 'Scandinavia', 'Nordic', 'Lapland', 'Liberia', 'Gabon', 'Namib', 'Himba', 'Kaokoveld', 'Angola', 'Bundjalung', 'Queensland', 'Top End', 'Kakadu', 'Arnhem', 'Māori', 'Maori', 'Aotearoa', 'Vanuatu', 'Caledonia', 'Melanesia', 'Formosa', 'Taiwan', 'Mongolia', 'Amazonia', 'Belém', 'Ver-o-Peso',
-  'Czech', 'Bohemia', 'Saaz', 'German', 'Berlin', 'Bavaria', 'Austria', 'Tyrol', 'Styria', 'Alps', 'Alpine', 'Bhutan', 'Himalayan', 'Tajik', 'Uzbek', 'Fergana', 'Silk Road', 'Bolivia', 'Honduras', 'Mesoamerica', 'Guatemala', 'Chile', 'Patagonia', 'Pehuenche', 'Mapuche', 'Sudan', 'Kordofan', 'Grenada', 'Lebanon', 'Lebanese', 'Cameroon', 'Gaboon', 'Ivoire', 'Ivorian', 'Burkina', 'Sahel', 'Hawaiʻi', 'Arizona', 'Sonora', 'Mojave', 'American Southwest', 'Inca', 'Wari', 'Quechua', 'Filipino', 'Tagalog', 'Manila', 'Alentejo', 'Calvillo', 'Aguascalientes', 'Žatec', 'Colombia', 'Buenos Aires', 'Priesbergalm', 'Kapulena', 'Côte'];
-function redact(text, ing, blind) {
-  const words = new Set(GEO);
-  for (const w of `${ing.place} ${ing.country}`.split(/[\s,()–-]+/)) if (w.length >= 4 && /^[A-ZÀ-Ý]/.test(w)) words.add(w.slice(0, Math.max(4, w.length - 2)));
-  if (blind) for (const w of ing.name.split(/[\s&()]+/)) if (w.length >= 3) words.add(w.slice(0, Math.max(3, w.length - 1)));
-  let out = text;
-  for (const w of words) out = out.replace(new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\p{L}'’]*`, blind && ing.name.includes(w) ? 'giu' : 'gu'), '▇▇▇');
-  return out;
-}
-
-function buildRounds(mode, seed, USES) {
-  const r = rng(seed), pick = (arr) => arr[Math.floor(r() * arr.length)];
-  const pool = INGREDIENTS.filter((i) => USES[i.id].length >= (mode === 'blind' ? 4 : 2) && i.id !== 'seasalt').sort((a, b) => USES[b.id].length - USES[a.id].length);
-  const rounds = [], used = new Set(), countries = new Set();
-  let guard = 0;
-  while (rounds.length < ROUNDS && guard++ < 500) {
-    if (mode === 'perfumes') {
-      const f = pick(FRAGRANCES);
-      const opts = [];
-      for (const t of ['top', 'heart', 'base']) for (const n of f.tiers[t]) { const id = noteId(n); if (id && !used.has(id) && pool.some((i) => i.id === id)) opts.push({ id, t, n }); }
-      if (!opts.length) continue;
-      const o = pick(opts), ing = INGREDIENTS.find((i) => i.id === o.id);
-      if (countries.has(ing.country) && guard < 300) continue;
-      used.add(ing.id); countries.add(ing.country); rounds.push({ ing, frag: f, tier: o.t, note: o.n });
-    } else {
-      // weight toward well-used ingredients so the classics come up more often
-      const ing = pool[Math.floor(Math.pow(r(), 0.8) * pool.length)];
-      if (used.has(ing.id) || (countries.has(ing.country) && guard < 300)) continue;
-      used.add(ing.id); countries.add(ing.country); rounds.push({ ing });
-    }
-  }
-  return rounds;
-}
-
-let A = null; // app api
-let S = null; // game state
-let gameEl, hud, fab, splash, fx, fctx, mouse = null, fxItems = [], accent = '#a85d32', pins = [], timer = 0, vignette = null, pinSeq = 0;
-
-// setting scrollTop forces a layout of the page just drawn, so it is only done when the game view isn't at the top already
-let gameScrolled = false;
-function gameTop() { if (gameScrolled) { gameEl.scrollTop = 0; gameScrolled = false; } }
-
-export function openGame(api, mode) {
-  A = api;
-  gameEl = document.getElementById('view-game');
-  if (!gameEl.dataset.watch) { gameEl.dataset.watch = '1'; gameEl.addEventListener('scroll', () => { gameScrolled = gameEl.scrollTop > 0; }, { passive: true }); }
-  A.play.active = true; A.play.ver++; A.refresh();
-  A.els.app.classList.add('playing'); A.els.panel.classList.add('playing');
-  A.els.list.classList.add('off-left'); A.els.detail.classList.add('off-right'); A.els.list.inert = true; A.els.detail.inert = true;
-  gameEl.classList.remove('off-right'); gameEl.inert = false;
-  if (!hud) {
-    hud = document.createElement('div'); hud.className = 'game-hud glass'; A.els.stage.appendChild(hud);
-    fab = document.createElement('button'); fab.className = 'btn primary game-fab'; fab.hidden = true; A.els.stage.appendChild(fab);
-    fab.addEventListener('click', fabAction);
-    gameEl.addEventListener('click', onPanelClick);
-    gameEl.addEventListener('input', onPanelInput);
-    splash = document.createElement('div'); splash.className = 'g-splash'; A.els.stage.appendChild(splash);
-    fx = document.createElement('canvas'); fx.className = 'g-fx'; A.els.labels.before(fx); fctx = fx.getContext('2d');
-    A.els.stage.addEventListener('pointermove', (e) => { const r = A.els.stage.getBoundingClientRect(); mouse = [e.clientX - r.left, e.clientY - r.top]; });
-    A.els.stage.addEventListener('pointerleave', () => { mouse = null; });
-  }
-  A.play.onPick = onPick; A.play.draw = frame; A.play.onKey = onKey;
-  // a milestone's "See it" plays its bonus fact in the daily scent's card slot
-  A.play.showFact = (id, r) => { const slot = gameEl.querySelector('[data-sc-fact]'); if (!slot) return false; scentFact(slot, { id, r, isNew: true }); slot.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); return true; };
-  A.play.markers = markers; A.play.arcs = arcs;
-  // Play is the daily scent, one per day; a finished day reopens on its end screen
-  scentOpen(true);
-  if (!store.get('help')) setTimeout(() => { if (S?.kind === 'scent' && !document.querySelector('dialog[open]')) openHelp(); }, 1400);
-  // keyboard players can start typing notes straight away; on touch screens the keyboard waits for a tap
-  const first = matchMedia('(hover: none)').matches ? gameEl.querySelector('[data-act="exit"]') : gameEl.querySelector('[data-sc-in]') || gameEl.querySelector('[data-act="exit"]');
-  first?.focus({ preventScroll: true });
-}
-
-export function closeGame() { if (A?.play.active && hud) leave(); }
-function leave() {
-  leaveRoom();
-  clearInterval(timer); vignette?.stop(); vignette = null; clearPins(); fxItems = []; fctx?.clearRect(0, 0, fx.width, fx.height);
-  hud.classList.remove('show'); fab.classList.remove('show'); fab.hidden = true;
-  gameEl.classList.add('off-right'); gameEl.inert = true; gameEl.innerHTML = '';
-  S = null; A.exit();
-}
-
-// ── screens ───────────────────────────────────────────────
-const ICONS = ['chanel-no-5', 'guerlain-shalimar', 'dior-sauvage-edt', 'tom-ford-lost-cherry', 'creed-aventus', 'yves-saint-laurent-black-opium', 'le-labo-santal-33', 'dior-j-adore'];
-function lobby(preset, whoPreset) {
-  if (S?.bonus) { clearInterval(timer); S = null; return scentOpen(true); }
-  if (NET) leaveRoom();
-  if (S?.kind === 'scent') S = null;
-  clearInterval(timer); clearPins(); vignette?.stop(); vignette = null; fxItems = [];
-  hud.classList.remove('show'); fab.classList.remove('show'); fab.hidden = true;
-  A.setTint(null); A.flyTo([24, 20], 1); A.setHash('play');
-  const sel = preset || store.get('mode') || 'notes', timed = store.get('timed') ?? false;
-  const who = whoPreset || store.get('who') || 'solo', me = myProfile();
-  const best = (m) => store.get(`best:${m}`);
-  const d = today();
-  gameEl.innerHTML = `
+import{INGREDIENTS as W,FRAGRANCES as j,FAMILIES as R,HOUSES as Je,ALIASES as _s,noteId as _t}from"./data.js";import{RARITY as K}from"./rarity.js";import*as Ce from"./stats.js";import{LADDER as Js,CHEST as Zs,rarer as Jt,loginState as Ze,markOpened as Qs}from"./streak.js";import{letters as Zt,cascade as T,countUp as Xs,replay as Le,typeOut as ea,burst as Qe,ring as Qt,mist as Xe,flyDrop as ta}from"./motion.js";const et=5,A=5e3,Q=60,me=500,z={notes:{label:"Notes",blurb:"See an ingredient, find where it grows.",icon:'<path d="M12 3c3 4 5 6.5 5 9.5a5 5 0 0 1-10 0C7 9.5 9 7 12 3z"/>'},perfumes:{label:"Perfumes",blurb:"A famous perfume and one of its notes. Where does that note come from?",icon:'<rect x="7" y="9" width="10" height="12" rx="2"/><path d="M10 9V6h4v3M9 3h6"/>'},blind:{label:"Blind nose",blurb:"No name. Just the material, its clues and your instinct.",icon:'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><path d="M4 4l16 16"/>'}},Ae=.15;function tt(e){let s=2166136261;for(let a=0;a<e.length;a++)s^=e.charCodeAt(a),s=Math.imul(s,16777619);return s>>>0}function Te(e){let s=e>>>0;return()=>{s=s+1831565813|0;let a=Math.imul(s^s>>>15,1|s);return a=a+Math.imul(a^a>>>7,61|a)^a,((a^a>>>14)>>>0)/4294967296}}const D=()=>new Date().toISOString().slice(0,10),$={get(e){try{return JSON.parse(localStorage.getItem("noteguessr:"+e))}catch{return null}},set(e,s){try{localStorage.setItem("noteguessr:"+e,JSON.stringify(s))}catch{}}},sa=e=>e==null?0:e<=50?A:Math.round(A*Math.exp(-(e-50)/2e3));function qe({km:e,clues:s,free:a,timed:r,left:i,time:n}){const l=sa(e),m=Math.max(0,s-a),u=Math.round(l*Ae*m),g=r&&e!=null&&l>=1e3?Math.round(me*Math.max(0,i)/n):0;return{distance:l,paid:m,hints:u,speed:g,points:l-u+g}}const aa=[[50,"Bullseye","#4f8f63"],[300,"Right on the doorstep","#4f8f63"],[1e3,"Very close","#46a758"],[2500,"Right region","#e2a336"],[5e3,"Same side of the world","#f76b15"],[1/0,"A long way off","#c4513f"]],Xt=e=>e==null?["","Out of time","#c4513f"]:aa.find(([s])=>e<s),oe=e=>e<10?`${e.toFixed(1)} km`:`${Math.round(e).toLocaleString()} km`,na={Europe:["Bulgaria","France","Italy","Switzerland","Ukraine","Russia","Spain","Bosnia and Herzegovina","Greece","North Macedonia","Croatia","Serbia","Netherlands","Ireland","United Kingdom","Finland","Hungary","Romania","Poland","Norway","Sweden","Germany","Austria","Czechia","Portugal"],"Southern Europe or Anatolia":["Turkey"],"the Caucasus":["Georgia"],"North Africa":["Morocco","Tunisia","Egypt"],"West Africa":["Ghana","Nigeria","Guinea","Senegal","Ivory Coast"],"the Sahel":["Sudan","Burkina Faso"],"Central Africa":["Gabon","Cameroon"],"the Horn of Africa":["Ethiopia","Somaliland"],"East or Southern Africa":["Tanzania","South Africa","Namibia"],"an island in the Indian Ocean, off Africa":["Madagascar","Comoros","Réunion"],"the Middle East":["Yemen","Iran","Oman","Saudi Arabia","Israel","Lebanon"],"Central Asia":["Kazakhstan","Kyrgyzstan","Uzbekistan","Tajikistan"],"South Asia":["India","Sri Lanka","Nepal","Bangladesh","Bhutan"],"East Asia":["China","Japan","South Korea","Taiwan","Mongolia"],"Southeast Asia":["Philippines","Indonesia","Laos","Vietnam","Malaysia","Thailand","Myanmar"],"North America":["United States","Canada"],"Central America or the Caribbean":["Mexico","Cuba","Haiti","El Salvador","Guatemala","Costa Rica","Jamaica","Martinique","Dominica","Bahamas","Belize","Honduras","Grenada"],"South America":["Brazil","Venezuela","Paraguay","Peru","Colombia","Ecuador","Argentina","Bolivia","Chile"],Oceania:["New Zealand","Australia","French Polynesia","Papua New Guinea","Vanuatu"]};function es(e,s){if(s==="United States"&&e[1]<-150&&e[0]<30)return"Oceania";for(const[a,r]of Object.entries(na))if(r.includes(s))return a;return e[1]<-30?"the Americas":e[0]>35?"the northern hemisphere":"the tropics"}const oa=["Ceylon","Bourbon","Persia","Arabia","Levant","Balkan","Himalaya","Amazon","Andes","Andean","Caribbean","Sahara","Africa","Asia","Europe","America","Mediterranean","Orient","French","Dutch","Spanish","Greek","Turkish","Swiss","Chinese","Japanese","Javanese","Malagasy","Thai","Lao","Somali","Yemeni","Omani","Peruvian","Haitian","Grasse","Provence","Calabria","Sicily","Tuscany","Florence","Kazanlak","Isparta","Mysore","Tamil","Kerala","Zanzibar","Java","Sumatra","Bali","Ghana","Tahiti","Polynesia","Polynesian","Hawaii","Chios","Martinique","Jamaica","Jamaican","Irish","Connemara","Quebec","Canadian","Australian","Colombian","Ecuadorian","Vietnamese","Mekong","Iranian","Sichuan","Szechuan","Kiso","Agen","Giresun","Bogotá","Ratnagiri","Alphonso","Bahia","Michoacán","Mexico","Mexican","Brazil","Comoros","Mayotte","Nosy","Réunion","Morocc","Egypt","Tunisia","India","Italian","Bulgaria","Russia","Siberia","Iran","Iraq","Oman","Dhofar","Somaliland","Ethiopia","Sri Lanka","Lankan","Vietnam","Indonesia","Philippin","Madagascar","Venezuel","Paraguay","Guatemala","Salvador","Haiti","Serbia","Bosnia","Croatia","Macedonia","Ukrain","Kazakh","Texas","Virginia","California","Florida","Nigeria","Cuba","Costa Rica","Spain","Portug","Atlas","Rif","Corsica","Corsican","Scotland","Scottish","Islay","Yorkshire","Tasmania","Tasmanian","Nepal","Nepalese","Dominica","Guinea","Fouta","Bahamas","Eleuthera","Cognac","Alba","Piedmont","Périgord","Cavaillon","Malatya","Niort","Poitevin","Ardèche","Misiones","Argentin","Finland","Finnish","Saudi","Ahsa","Kashmir","Limousin","Crete","Cretan","Andalusia","Erode","Cederberg","Cape","Hungar","Henan","Jimma","Madhya","Loire","English","England","Britain","British","Galilee","Polish","Burm","Bengal","Malay","Ipoh","Maya","Honshu","Aegean","Korean","Bangkok","Ottoman","Kyrgyz","Hejaz","Mecca","Scandinavia","Nordic","Lapland","Liberia","Gabon","Namib","Himba","Kaokoveld","Angola","Bundjalung","Queensland","Top End","Kakadu","Arnhem","Māori","Maori","Aotearoa","Vanuatu","Caledonia","Melanesia","Formosa","Taiwan","Mongolia","Amazonia","Belém","Ver-o-Peso","Czech","Bohemia","Saaz","German","Berlin","Bavaria","Austria","Tyrol","Styria","Alps","Alpine","Bhutan","Himalayan","Tajik","Uzbek","Fergana","Silk Road","Bolivia","Honduras","Mesoamerica","Guatemala","Chile","Patagonia","Pehuenche","Mapuche","Sudan","Kordofan","Grenada","Lebanon","Lebanese","Cameroon","Gaboon","Ivoire","Ivorian","Burkina","Sahel","Hawaiʻi","Arizona","Sonora","Mojave","American Southwest","Inca","Wari","Quechua","Filipino","Tagalog","Manila","Alentejo","Calvillo","Aguascalientes","Žatec","Colombia","Buenos Aires","Priesbergalm","Kapulena","Côte"];function ts(e,s,a){const r=new Set(oa);for(const n of`${s.place} ${s.country}`.split(/[\s,()–-]+/))n.length>=4&&/^[A-ZÀ-Ý]/.test(n)&&r.add(n.slice(0,Math.max(4,n.length-2)));if(a)for(const n of s.name.split(/[\s&()]+/))n.length>=3&&r.add(n.slice(0,Math.max(3,n.length-1)));let i=e;for(const n of r)i=i.replace(new RegExp(`(?<![\\p{L}])${n.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}[\\p{L}'’]*`,a&&s.name.includes(n)?"giu":"gu"),"▇▇▇");return i}function Ne(e,s,a){const r=Te(s),i=d=>d[Math.floor(r()*d.length)],n=W.filter(d=>a[d.id].length>=(e==="blind"?4:2)&&d.id!=="seasalt").sort((d,c)=>a[c.id].length-a[d.id].length),l=[],m=new Set,u=new Set;let g=0;for(;l.length<et&&g++<500;)if(e==="perfumes"){const d=i(j),c=[];for(const b of["top","heart","base"])for(const v of d.tiers[b]){const k=_t(v);k&&!m.has(k)&&n.some(N=>N.id===k)&&c.push({id:k,t:b,n:v})}if(!c.length)continue;const p=i(c),f=W.find(b=>b.id===p.id);if(u.has(f.country)&&g<300)continue;m.add(f.id),u.add(f.country),l.push({ing:f,frag:d,tier:p.t,note:p.n})}else{const d=n[Math.floor(Math.pow(r(),.8)*n.length)];if(m.has(d.id)||u.has(d.country)&&g<300)continue;m.add(d.id),u.add(d.country),l.push({ing:d})}return l}let o=null,t=null,h,L,S,X,I,st,ee=null,w=[],O="#a85d32",He=[],x=0,C=null,ra=0,at=!1;function V(){at&&(h.scrollTop=0,at=!1)}function An(e,s){o=e,h=document.getElementById("view-game"),h.dataset.watch||(h.dataset.watch="1",h.addEventListener("scroll",()=>{at=h.scrollTop>0},{passive:!0})),o.play.active=!0,o.play.ver++,o.refresh(),o.els.app.classList.add("playing"),o.els.panel.classList.add("playing"),o.els.list.classList.add("off-left"),o.els.detail.classList.add("off-right"),o.els.list.inert=!0,o.els.detail.inert=!0,h.classList.remove("off-right"),h.inert=!1,L||(L=document.createElement("div"),L.className="game-hud glass",o.els.stage.appendChild(L),S=document.createElement("button"),S.className="btn primary game-fab",S.hidden=!0,o.els.stage.appendChild(S),S.addEventListener("click",Qa),h.addEventListener("click",Ja),h.addEventListener("input",ln),X=document.createElement("div"),X.className="g-splash",o.els.stage.appendChild(X),I=document.createElement("canvas"),I.className="g-fx",o.els.labels.before(I),st=I.getContext("2d"),o.els.stage.addEventListener("pointermove",r=>{const i=o.els.stage.getBoundingClientRect();ee=[r.clientX-i.left,r.clientY-i.top]}),o.els.stage.addEventListener("pointerleave",()=>{ee=null})),o.play.onPick=da,o.play.draw=an,o.play.onKey=Za,o.play.showFact=(r,i)=>{const n=h.querySelector("[data-sc-fact]");return n?(Fe(n,{id:r,r:i,isNew:!0}),n.scrollIntoView({block:"center",behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"}),!0):!1},o.play.markers=Xa,o.play.arcs=en,De(!0),$.get("help")||setTimeout(()=>{t?.kind==="scent"&&!document.querySelector("dialog[open]")&&Ga()},1400),(matchMedia("(hover: none)").matches?h.querySelector('[data-act="exit"]'):h.querySelector("[data-sc-in]")||h.querySelector('[data-act="exit"]'))?.focus({preventScroll:!0})}function Tn(){o?.play.active&&L&&Ee()}function Ee(){xe(),clearInterval(x),C?.stop(),C=null,F(),w=[],st?.clearRect(0,0,I.width,I.height),L.classList.remove("show"),S.classList.remove("show"),S.hidden=!0,h.classList.add("off-right"),h.inert=!0,h.innerHTML="",t=null,o.exit()}const ss=["chanel-no-5","guerlain-shalimar","dior-sauvage-edt","tom-ford-lost-cherry","creed-aventus","yves-saint-laurent-black-opium","le-labo-santal-33","dior-j-adore"];function fe(e,s){if(t?.bonus)return clearInterval(x),t=null,De(!0);y&&xe(),t?.kind==="scent"&&(t=null),clearInterval(x),F(),C?.stop(),C=null,w=[],L.classList.remove("show"),S.classList.remove("show"),S.hidden=!0,o.setTint(null),o.flyTo([24,20],1),o.setHash("play");const a=e||$.get("mode")||"notes",r=$.get("timed")??!1,i=s||$.get("who")||"solo",n=ue(),l=c=>$.get(`best:${c}`),m=D();h.innerHTML=`
     <div class="game">
       <div class="detail-top"><button class="btn icon ghost" data-act="exit" aria-label="Back to the atlas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
         <div class="crumbs"><span>Atlas</span><span>/</span><b>Fraguessr</b></div></div>
       <div class="hero frag g-lobby" id="g-hero"><div class="model"></div>
-        <div class="g-drift" aria-hidden="true">${drift()}</div>
+        <div class="g-drift" aria-hidden="true">${ia()}</div>
         <div class="g-lh"><div class="g-logo"><span class="g-ping"></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s7-6.3 7-12a7 7 0 1 0-14 0c0 5.7 7 12 7 12z"/><circle cx="12" cy="10" r="2.6"/></svg></div>
           <div><span class="mono g-kicker">A fragrance geography game</span><h2 class="title">Fraguessr</h2></div></div>
       </div>
       <div class="g-intro">
         <p class="prose">Every note in a perfume started somewhere: a valley of roses, a grove of bergamot, a forest of resin trees. Drop a pin where you think it grows. The closer you land, the more points you score, up to <b>5,000</b> a round.</p>
       </div>
-      ${scentCard()}
+      ${za()}
       <div class="section-h"><span>Mode</span></div>
-      <div class="g-modes" role="radiogroup">${Object.entries(MODES).map(([k, m]) => `
-        <button class="g-mode" role="radio" data-mode="${k}" aria-checked="${k === sel}">
-          <span class="g-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${m.icon}</svg></span>
-          <span class="g-mt">${m.label}<span>${m.blurb}</span></span>
-          <span class="g-best mono">${best(k) ? `best ${best(k).toLocaleString()}` : ''}</span>
-        </button>`).join('')}</div>
+      <div class="g-modes" role="radiogroup">${Object.entries(z).map(([c,p])=>`
+        <button class="g-mode" role="radio" data-mode="${c}" aria-checked="${c===a}">
+          <span class="g-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p.icon}</svg></span>
+          <span class="g-mt">${p.label}<span>${p.blurb}</span></span>
+          <span class="g-best mono">${l(c)?`best ${l(c).toLocaleString()}`:""}</span>
+        </button>`).join("")}</div>
       <div class="section-h"><span>Players</span></div>
-      <div class="g-who" role="tablist" aria-label="Who is playing">${Object.entries(WHO).map(([k, w]) => `<button role="tab" data-who="${k}" aria-selected="${k === who}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${w.icon}</svg>${w.label}</button>`).join('')}</div>
-      <div class="g-whop" data-whop="solo" ${who === 'solo' ? '' : 'hidden'}>
+      <div class="g-who" role="tablist" aria-label="Who is playing">${Object.entries(Lt).map(([c,p])=>`<button role="tab" data-who="${c}" aria-selected="${c===i}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p.icon}</svg>${p.label}</button>`).join("")}</div>
+      <div class="g-whop" data-whop="solo" ${i==="solo"?"":"hidden"}>
         <div class="g-opts">
-          <label class="g-switch"><input type="checkbox" data-opt="timed" ${timed ? 'checked' : ''}><span></span><b>Timer</b><em>${TIME} seconds a round, with a speed bonus of up to ${SPEED}</em></label>
+          <label class="g-switch"><input type="checkbox" data-opt="timed" ${r?"checked":""}><span></span><b>Timer</b><em>${Q} seconds a round, with a speed bonus of up to ${me}</em></label>
         </div>
       </div>
-      <div class="g-whop" data-whop="online" ${who === 'online' ? '' : 'hidden'}>
-        <p class="g-note muted">Play live with friends who have this page open. Everyone gets the same five rounds and ${TIME} seconds a guess, and the host moves the room on.</p>
-        <label class="g-field"><span>Your name</span><input data-nick maxlength="18" autocomplete="off" value="${A.esc(me.nm)}"></label>
-        <div class="g-colors" role="group" aria-label="Your colour">${colorDots(me.col)}</div>
+      <div class="g-whop" data-whop="online" ${i==="online"?"":"hidden"}>
+        <p class="g-note muted">Play live with friends who have this page open. Everyone gets the same five rounds and ${Q} seconds a guess, and the host moves the room on.</p>
+        <label class="g-field"><span>Your name</span><input data-nick maxlength="18" autocomplete="off" value="${o.esc(n.nm)}"></label>
+        <div class="g-colors" role="group" aria-label="Your colour">${Ds(n.col)}</div>
         <div class="g-join"><input data-code maxlength="4" autocomplete="off" spellcheck="false" placeholder="CODE" aria-label="Room code"><button class="btn" data-act="join">Join room</button></div>
         <div class="g-open" data-open></div>
         <p class="g-note muted" data-netnote>Connecting…</p>
       </div>
-      <div class="g-whop" data-whop="local" ${who === 'local' ? '' : 'hidden'}>
+      <div class="g-whop" data-whop="local" ${i==="local"?"":"hidden"}>
         <p class="g-note muted">Take turns on this device. Each player guesses the same round in private, then everyone's pins land together.</p>
-        <div class="g-local" data-local>${localRows()}</div>
-        <div class="g-opts"><label class="g-switch"><input type="checkbox" data-opt="ltimed" ${timed ? 'checked' : ''}><span></span><b>Timer</b><em>${TIME} seconds a turn, with a speed bonus of up to ${SPEED}</em></label></div>
+        <div class="g-local" data-local>${qt()}</div>
+        <div class="g-opts"><label class="g-switch"><input type="checkbox" data-opt="ltimed" ${r?"checked":""}><span></span><b>Timer</b><em>${Q} seconds a turn, with a speed bonus of up to ${me}</em></label></div>
       </div>
-      <button class="btn primary g-start" data-act="start"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg><span data-startlabel>${WHO[who].start}</span></button>
+      <button class="btn primary g-start" data-act="start"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg><span data-startlabel>${Lt[i].start}</span></button>
       <div class="g-how">
         <div><b>1</b><span>Study the material and its clues. Each extra hint costs 15% of the round's distance points.</span></div>
         <div><b>2</b><span>Spin and zoom the globe, then tap to drop your pin. Country names appear as you zoom in.</span></div>
-        <div><b>3</b><span>Lock in your guess. A pin within 50 km scores the full 5,000, then points ease off with distance (about 3,100 at 1,000 km). On the clock, a fast guess in the right part of the world earns up to ${SPEED} extra.</span></div>
+        <div><b>3</b><span>Lock in your guess. A pin within 50 km scores the full 5,000, then points ease off with distance (about 3,100 at 1,000 km). On the clock, a fast guess in the right part of the world earns up to ${me} extra.</span></div>
       </div>
-      <p class="g-foot mono muted">${d} · ${INGREDIENTS.length} ingredients · ${FRAGRANCES.length} perfumes</p>
-    </div>`;
-  gameTop();
-  enter(gameEl.querySelector('.game'));
-  lightOnline();
-  // a slowly turning signature bottle
-  const hero = gameEl.querySelector('#g-hero'), host = hero.querySelector('.model');
-  const f = FRAGRANCES.find((x) => x.id === ICONS[Math.floor(Math.random() * ICONS.length)]) || FRAGRANCES[0];
-  A.getStage().then((st) => {
-    if (!st || !host.isConnected) return;
-    st.mount(host);
-    const sig = A.fragHex(f), dark = A.isDark();
-    st.showFragrance(f, A.liquidFor(f), f.ingredients.slice(0, 3).map((id) => A.ING[id]), dark ? A.mix(sig, '#332c27', 0.8) : A.mix(sig, '#ffffff', 0.88), sig,
-      dark ? [A.mix(sig, '#141110', 0.82), A.mix(sig, '#1d1916', 0.72)] : [A.mix(sig, '#fffdfa', 0.84), A.mix(sig, '#f3ede4', 0.7)]);
-    st.ready().then(() => requestAnimationFrame(() => hero.classList.add('loaded')));
-  });
-}
-function drift() {
-  const picks = INGREDIENTS.filter((i) => A.USES[i.id].length > 15).sort(() => Math.random() - 0.5).slice(0, 7);
-  return picks.map((i, k) => `<span style="--c:${A.ingHex(i)};--x:${8 + ((k * 37) % 84)}%;--d:${(k * 1.3) % 7}s;--t:${9 + (k % 3) * 2}s"><i></i>${A.esc(i.name)}</span>`).join('');
-}
-// stagger children of the screen in, top to bottom
-function enter(root) { if (!root) return; [...root.children].forEach((el, k) => { el.classList.add('g-in'); el.style.setProperty('--i', k); }); }
-
-function start() {
-  const mode = gameEl.querySelector('.g-mode[aria-checked="true"]')?.dataset.mode || 'notes';
-  const who = gameEl.querySelector('[data-who][aria-selected="true"]')?.dataset.who || 'solo';
-  store.set('mode', mode); store.set('who', who);
-  if (who === 'online') return createRoom(mode);
-  if (who === 'local') return startLocal(mode, gameEl.querySelector('[data-opt="ltimed"]').checked);
-  const timed = gameEl.querySelector('[data-opt="timed"]').checked;
-  store.set('timed', timed);
-  const seed = (Math.random() * 2 ** 32) >>> 0;
-  S = rules({ mode, timed, seed, rounds: buildRounds(mode, seed, A.USES), i: -1, results: [], total: 0 });
-  A.setHash('play-' + mode);
-  next();
-}
-
-// online rooms always run the clock
-function rules(st) { return Object.assign(st, st.mp?.kind === 'online' ? { timed: true, time: TIME, free: 0 } : { time: TIME, free: 0 }); }
-function next() {
-  if (!S) return;
-  S.i++;
-  if (S.i >= S.rounds.length) return summary();
-  const R = S.rounds[S.i];
-  S.phase = 'guess'; S.guess = null; S.clues = S.free; S.left = S.time;
-  if (S.mp) { S.mp.turn = 0; S.mp.pinKey = ''; }
-  clearPins(); fxItems = [];
-  A.play.ver++; A.refresh();
-  A.setTint(A.ingHex(R.ing), R.ing.c);
-  A.view.tScale = 1; A.flyTo([20 + (Math.random() - 0.5) * 30, R.ing.loc[1] + 70 + Math.random() * 140], 1);
-  renderRound();
-  renderHud();
-  showSplash(S.mp?.kind === 'local' ? turnSplash() : `<span class="mono">Round ${S.i + 1} of ${S.rounds.length}</span><b>${prompt(R)}</b>`);
-  accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || accent;
-  startClock();
-}
-function startClock() {
-  clearInterval(timer);
-  if (S.timed) timer = setInterval(() => {
-    if (S?.phase !== 'guess') return clearInterval(timer);
-    S.left--; renderHud();
-    if (S.left <= 0) { clearInterval(timer); submit(true); }
-  }, 1000);
-}
-
-function showSplash(html) {
-  splash.innerHTML = `<div>${html}</div>`;
-  splash.classList.remove('show'); void splash.offsetWidth; splash.classList.add('show');
-}
-function prompt(R) {
-  if (S.mode === 'perfumes') return `${A.esc(R.frag.name)} lists <b>${A.esc(R.note)}</b> in its ${R.tier === 'heart' ? 'heart' : R.tier} notes. Where does it come from?`;
-  if (S.mode === 'blind') return 'Where in the world does this come from?';
-  return `Where does <b>${A.esc(R.ing.name)}</b> come from?`;
-}
-function clueList(R) {
-  const ing = R.ing, blind = S.mode === 'blind';
-  return [
-    { k: 'How it is made', v: `${A.esc(ing.method)}. Harvest: ${A.esc(ing.season.charAt(0).toLowerCase() + ing.season.slice(1))}.` },
-    { k: 'Field notes', v: A.esc(redact(ing.about, ing, blind)) },
-    { k: 'Region', v: `Somewhere in ${region(ing.loc, ing.country)}.` },
-  ];
-}
-
-const worth = () => Math.round(MAX * (1 - CLUE_COST * Math.max(0, S.clues - S.free))).toLocaleString();
-function renderRound() {
-  const R = S.rounds[S.i], ing = R.ing, blind = S.mode === 'blind';
-  const fam = FAMILIES[ing.family];
-  const clues = clueList(R);
-  gameEl.innerHTML = `
+      <p class="g-foot mono muted">${m} · ${W.length} ingredients · ${j.length} perfumes</p>
+    </div>`,V(),q(h.querySelector(".game")),fn();const u=h.querySelector("#g-hero"),g=u.querySelector(".model"),d=j.find(c=>c.id===ss[Math.floor(Math.random()*ss.length)])||j[0];o.getStage().then(c=>{if(!c||!g.isConnected)return;c.mount(g);const p=o.fragHex(d),f=o.isDark();c.showFragrance(d,o.liquidFor(d),d.ingredients.slice(0,3).map(b=>o.ING[b]),f?o.mix(p,"#332c27",.8):o.mix(p,"#ffffff",.88),p,f?[o.mix(p,"#141110",.82),o.mix(p,"#1d1916",.72)]:[o.mix(p,"#fffdfa",.84),o.mix(p,"#f3ede4",.7)]),c.ready().then(()=>requestAnimationFrame(()=>u.classList.add("loaded")))})}function ia(){return W.filter(s=>o.USES[s.id].length>15).sort(()=>Math.random()-.5).slice(0,7).map((s,a)=>`<span style="--c:${o.ingHex(s)};--x:${8+a*37%84}%;--d:${a*1.3%7}s;--t:${9+a%3*2}s"><i></i>${o.esc(s.name)}</span>`).join("")}function q(e){e&&[...e.children].forEach((s,a)=>{s.classList.add("g-in"),s.style.setProperty("--i",a)})}function la(){const e=h.querySelector('.g-mode[aria-checked="true"]')?.dataset.mode||"notes",s=h.querySelector('[data-who][aria-selected="true"]')?.dataset.who||"solo";if($.set("mode",e),$.set("who",s),s==="online")return gn(e);if(s==="local")return Fs(e,h.querySelector('[data-opt="ltimed"]').checked);const a=h.querySelector('[data-opt="timed"]').checked;$.set("timed",a);const r=Math.random()*2**32>>>0;t=ge({mode:e,timed:a,seed:r,rounds:Ne(e,r,o.USES),i:-1,results:[],total:0}),o.setHash("play-"+e),re()}function ge(e){return Object.assign(e,e.mp?.kind==="online"?{timed:!0,time:Q,free:0}:{time:Q,free:0})}function re(){if(!t)return;if(t.i++,t.i>=t.rounds.length)return ls();const e=t.rounds[t.i];t.phase="guess",t.guess=null,t.clues=t.free,t.left=t.time,t.mp&&(t.mp.turn=0,t.mp.pinKey=""),F(),w=[],o.play.ver++,o.refresh(),o.setTint(o.ingHex(e.ing),e.ing.c),o.view.tScale=1,o.flyTo([20+(Math.random()-.5)*30,e.ing.loc[1]+70+Math.random()*140],1),os(),_(),ie(t.mp?.kind==="local"?Gs():`<span class="mono">Round ${t.i+1} of ${t.rounds.length}</span><b>${nt(e)}</b>`),O=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||O,as()}function as(){clearInterval(x),t.timed&&(x=setInterval(()=>{if(t?.phase!=="guess")return clearInterval(x);t.left--,_(),t.left<=0&&(clearInterval(x),Ie(!0))},1e3))}function ie(e){X.innerHTML=`<div>${e}</div>`,X.classList.remove("show"),X.offsetWidth,X.classList.add("show")}function nt(e){return t.mode==="perfumes"?`${o.esc(e.frag.name)} lists <b>${o.esc(e.note)}</b> in its ${e.tier==="heart"?"heart":e.tier} notes. Where does it come from?`:t.mode==="blind"?"Where in the world does this come from?":`Where does <b>${o.esc(e.ing.name)}</b> come from?`}function ca(e){const s=e.ing,a=t.mode==="blind";return[{k:"How it is made",v:`${o.esc(s.method)}. Harvest: ${o.esc(s.season.charAt(0).toLowerCase()+s.season.slice(1))}.`},{k:"Field notes",v:o.esc(ts(s.about,s,a))},{k:"Region",v:`Somewhere in ${es(s.loc,s.country)}.`}]}const ns=()=>Math.round(A*(1-Ae*Math.max(0,t.clues-t.free))).toLocaleString();function os(){const e=t.rounds[t.i],s=e.ing,a=t.mode==="blind",r=R[s.family],i=ca(e);h.innerHTML=`
     <div class="game">
       <div class="detail-top"><button class="btn icon ghost" data-act="lobby" aria-label="Quit to game menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-        <div class="crumbs"><span>Fraguessr</span><span>/</span><b>Round ${S.i + 1} of ${S.rounds.length}</b></div>
-        <span class="g-total mono">${S.mp?.kind === 'local' ? `${A.esc(turnPlayer().nm)} · ${turnPlayer().total.toLocaleString()}` : S.total.toLocaleString()} pts</span></div>
-      <div class="g-steps">${S.rounds.map((_, k) => `<i class="${k < S.i ? 'done' : k === S.i ? 'cur' : ''}" style="${k < S.i ? `--q:${Math.min(1, S.results[k].points / MAX)}` : ''}"></i>`).join('')}</div>
-      ${turnBanner()}
-      <div class="hero${R.frag ? ' frag' : ''}" id="g-hero">${R.frag ? '' : '<canvas class="vignette"></canvas><div class="fade"></div>'}<div class="model"></div>
-        <span class="badge glass tag mono">${R.frag ? `${A.esc(R.frag.house)} · ${R.frag.year}` : blind ? 'Mystery material' : A.esc(fam.label)}</span><span class="badge glass tag2 mono">Drag to turn</span></div>
+        <div class="crumbs"><span>Fraguessr</span><span>/</span><b>Round ${t.i+1} of ${t.rounds.length}</b></div>
+        <span class="g-total mono">${t.mp?.kind==="local"?`${o.esc(pe().nm)} · ${pe().total.toLocaleString()}`:t.total.toLocaleString()} pts</span></div>
+      <div class="g-steps">${t.rounds.map((u,g)=>`<i class="${g<t.i?"done":g===t.i?"cur":""}" style="${g<t.i?`--q:${Math.min(1,t.results[g].points/A)}`:""}"></i>`).join("")}</div>
+      ${cn()}
+      <div class="hero${e.frag?" frag":""}" id="g-hero">${e.frag?"":'<canvas class="vignette"></canvas><div class="fade"></div>'}<div class="model"></div>
+        <span class="badge glass tag mono">${e.frag?`${o.esc(e.frag.house)} · ${e.frag.year}`:a?"Mystery material":o.esc(r.label)}</span><span class="badge glass tag2 mono">Drag to turn</span></div>
       <div class="body">
-        <h2 class="title g-q">${prompt(R)}</h2>
-        <div class="badges"><span class="badge"><span class="dot" style="background:${A.ingHex(ing)}"></span>${fam.label}</span><span class="badge soft">${A.esc(ing.part)}</span>${!blind ? `<span class="badge soft mono" style="font-style:italic">${A.esc(ing.latin)}</span>` : ''}${R.frag ? `<span class="badge soft">${A.esc(R.frag.name)}</span>` : ''}</div>
-        <div class="g-clues">${clues.map((c, k) => `
-          <div class="g-clue${k < S.clues ? ' open' : ''}" data-k="${k}">
-            <button class="g-clue-h" data-act="clue" data-k="${k}" ${k !== S.clues ? 'disabled' : ''}><span>${c.k}${k < S.free ? '<em class="g-free">Free hint</em>' : ''}</span><span class="mono">${k < S.clues ? 'revealed' : `−${Math.round(CLUE_COST * 100)}%`}</span></button>
-            <div class="g-clue-b"><p>${c.v}</p></div>
-          </div>`).join('')}</div>
+        <h2 class="title g-q">${nt(e)}</h2>
+        <div class="badges"><span class="badge"><span class="dot" style="background:${o.ingHex(s)}"></span>${r.label}</span><span class="badge soft">${o.esc(s.part)}</span>${a?"":`<span class="badge soft mono" style="font-style:italic">${o.esc(s.latin)}</span>`}${e.frag?`<span class="badge soft">${o.esc(e.frag.name)}</span>`:""}</div>
+        <div class="g-clues">${i.map((u,g)=>`
+          <div class="g-clue${g<t.clues?" open":""}" data-k="${g}">
+            <button class="g-clue-h" data-act="clue" data-k="${g}" ${g!==t.clues?"disabled":""}><span>${u.k}${g<t.free?'<em class="g-free">Free hint</em>':""}</span><span class="mono">${g<t.clues?"revealed":`−${Math.round(Ae*100)}%`}</span></button>
+            <div class="g-clue-b"><p>${u.v}</p></div>
+          </div>`).join("")}</div>
         <div class="g-cta">
-          <div class="g-max mono">Worth up to <b>${worth()}</b> pts${S.timed ? `<span class="g-bonus">+${SPEED} speed</span>` : ''}</div>
-          <button class="btn primary" data-act="guess" ${S.guess ? '' : 'disabled'}>${S.guess ? 'Lock in guess' : 'Tap the globe to drop a pin'}</button>
+          <div class="g-max mono">Worth up to <b>${ns()}</b> pts${t.timed?`<span class="g-bonus">+${me} speed</span>`:""}</div>
+          <button class="btn primary" data-act="guess" ${t.guess?"":"disabled"}>${t.guess?"Lock in guess":"Tap the globe to drop a pin"}</button>
         </div>
       </div>
-    </div>`;
-  gameTop();
-  enter(gameEl.querySelector('.game')); enter(gameEl.querySelector('.body'));
-  // 3D model
-  const hero = gameEl.querySelector('#g-hero'), host = hero.querySelector('.model');
-  vignette?.stop(); vignette = null;
-  const cv = hero.querySelector('canvas.vignette'); if (cv) vignette = A.createVignette(cv, ing);
-  A.getStage().then((st) => {
-    if (!st || !host.isConnected) { hero.classList.add('no-3d'); return; }
-    st.mount(host);
-    const dark = A.isDark();
-    if (R.frag) {
-      const sig = A.fragHex(R.frag), notes = [ing, ...R.frag.ingredients.filter((id) => id !== ing.id).slice(0, 2).map((id) => A.ING[id])];
-      st.showFragrance(R.frag, A.liquidFor(R.frag), notes, dark ? A.mix(sig, '#332c27', 0.8) : A.mix(sig, '#ffffff', 0.88), sig,
-        dark ? [A.mix(sig, '#141110', 0.82), A.mix(sig, '#1d1916', 0.72)] : [A.mix(sig, '#fffdfa', 0.84), A.mix(sig, '#f3ede4', 0.7)]);
-    } else {
-      st.showIngredient(ing, A.ingHex(ing), dark ? A.mix(A.ingHex(ing), '#2a2a2e', 0.78) : A.mix(A.ingHex(ing), '#ffffff', 0.82),
-        blind ? { title: `Specimen ${String.fromCharCode(65 + S.i)}`, sub: 'origin unknown' } : undefined);
-    }
-    st.ready().then(() => requestAnimationFrame(() => hero.classList.add('loaded')));
-  });
-}
-
-function renderHud() {
-  if (!S) return;
-  const R = S.rounds[S.i];
-  if (S.phase === 'guess') {
-    hud.innerHTML = `${dots()}${S.mp ? `<span class="g-chips">${chipsHtml()}</span>` : ''}<span class="g-hq">${prompt(R)}</span>${S.timed ? `<span class="g-ring${S.left <= Math.min(10, S.time / 3) ? ' low' : ''}" style="--p:${S.left / S.time}"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15"/><circle cx="18" cy="18" r="15"/></svg><b class="mono">${S.left}</b></span>` : ''}`;
-    fab.textContent = S.guess ? 'Lock in guess' : 'Tap the globe to drop a pin';
-    fab.disabled = !S.guess; fab.classList.toggle('ready', !!S.guess);
-  } else if (S.phase === 'reveal') {
-    const res = S.results[S.i];
-    hud.innerHTML = `${dots()}<span class="g-hq"><b>${A.esc(R.ing.name)}</b> · ${A.esc(R.ing.place)}, ${A.esc(R.ing.country)}</span><span class="g-pts mono">+${res.points.toLocaleString()}</span>`;
-    const nb = nextState();
-    fab.textContent = nb.label; fab.disabled = !nb.ok; fab.classList.toggle('ready', nb.ok);
-  } else if (S.phase === 'pass') {
-    const P = S.mp.players[S.mp.turn + 1];
-    hud.innerHTML = `${dots()}<span class="g-hq">Pass the device to <b>${A.esc(P.nm)}</b></span>`;
-    fab.textContent = `I'm ${P.nm}, show my round`; fab.disabled = false; fab.classList.add('ready');
-  }
-  hud.classList.add('show'); fab.classList.add('show'); fab.hidden = false;
-}
-
-function dots() {
-  return `<span class="g-dots">${S.rounds.map((_, k) => { const r = S.results[k]; return `<i class="${k === S.i && S.phase !== 'done' ? 'cur' : ''}" style="${r ? `--c:${r.points >= 4000 ? '#4f8f63' : r.points >= 2500 ? '#e2a336' : r.points >= 1000 ? '#f76b15' : '#c4513f'}` : ''}"></i>`; }).join('')}</span>`;
-}
-function onPick(ll) {
-  if (S?.phase !== 'guess') return;
-  S.guess = ll;
-  A.play.ver++; A.refresh();
-  setPins([{ loc: ll, kind: 'guess' }]);
-  fxItems.push({ type: 'ripple', loc: ll, t0: performance.now(), color: accent });
-  const b = gameEl.querySelector('[data-act="guess"]'); if (b) { b.disabled = false; b.textContent = 'Lock in guess'; }
-  renderHud();
-}
-
-// score the current guess (or the lack of one) for whoever is guessing
-function record() {
-  const R = S.rounds[S.i], ing = R.ing;
-  const km = S.guess ? A.haversine(S.guess, ing.loc) : null;
-  const sc = scoreRound({ km, clues: S.clues, free: S.free, timed: S.timed, left: S.left, time: S.time });
-  return { ing, frag: R.frag, guess: S.guess, km, points: sc.points, clues: S.clues, sc, left: S.left };
-}
-function submit(timeout) {
-  if (S?.phase !== 'guess') return;
-  if (!S.guess && !timeout) return;
-  clearInterval(timer);
-  if (S.mp?.kind === 'local') return submitLocal();
-  const R = S.rounds[S.i], ing = R.ing;
-  const rec = record(), km = rec.km, points = rec.points;
-  S.results.push(rec);
-  S.total += points; S.phase = 'reveal';
-  if (S.bonus) store.set(`geo:${S.bonus}`, { rounds: S.results.map((r) => ({ id: r.ing.id, guess: r.guess, km: r.km, points: r.points })) });
-  if (S.mp) publishMine();
-  A.play.ver++; A.refresh();
-  const res = S.results[S.i], now = performance.now(), color = A.ingHex(ing);
-  setPins(S.guess ? [{ loc: S.guess, kind: 'guess' }] : []);
-  const arrive = () => {
-    if (S?.results[S.i] !== res) return;
-    const t = performance.now();
-    res.arrived = true; A.play.ver++; A.refresh();
-    setPins(revealPins(true)); if (S.mp) S.mp.pinKey = othersKey();
-    if (S.guess) fxItems.push({ type: 'label', from: S.guess, to: ing.loc, t0: t, text: kmText(km), color: tierOf(km)[2] });
-    fxItems.push({ type: 'burst', loc: ing.loc, t0: t, color, parts: sparks(points >= 4000 ? 34 : 20) });
-    fxItems.push({ type: 'float', loc: ing.loc, t0: t, text: `+${points.toLocaleString()}`, color });
-    if (points >= 4500) fxItems.push({ type: 'confetti', t0: t, parts: confetti(), colors: [color, ...ing.c, accent] });
-  };
-  if (S.guess) fxItems.push({ type: 'arc', from: S.guess, to: ing.loc, t0: now + 450, dur: Math.min(1700, 700 + km / 12), color, done: arrive, keep: true });
-  else setTimeout(arrive, 600);
-  if (S.guess) {
-    const z = km < 400 ? 2.8 : km < 1200 ? 2.1 : km < 3000 ? 1.5 : km < 7000 ? 1.1 : 0.9;
-    A.flyTo(A.midpoint([S.guess, ing.loc]), z);
-  } else A.flyTo(ing.loc, 1.8);
-  renderReveal(km, res);
-  renderHud();
-}
-
-function ingInfo(ing) {
-  const uses = A.USES[ing.id], top = uses.slice().sort((a, b) => a.f.name.localeCompare(b.f.name)).slice(0, 6);
-  return `<div><h2 class="title">${A.esc(ing.name)}</h2><div class="latin">${A.esc(ing.latin)}</div></div>
-    <div class="badges"><span class="badge"><span class="dot" style="background:${A.ingHex(ing)}"></span>${FAMILIES[ing.family].label}</span><span class="badge soft">${A.esc(ing.place)}</span><span class="badge soft">${A.esc(ing.country)}</span></div>
-    <p class="prose">${A.esc(ing.about)}</p>
-    <div class="section-h"><span>Goes into ${uses.length} perfume${uses.length === 1 ? '' : 's'} in the atlas</span></div>
-    <div class="notes">${top.map((u) => `<span class="badge note">${A.esc(u.f.name)} <span class="mono muted">${A.esc(u.f.house)}</span></span>`).join('')}${uses.length > top.length ? `<span class="badge soft mono">+${uses.length - top.length} more</span>` : ''}</div>`;
-}
-function renderReveal(km, res) {
-  const points = res.points;
-  const R = S.rounds[S.i], ing = R.ing;
-  const body = gameEl.querySelector('.body');
-  body.innerHTML = `
-    ${resultCard(km, res, ing)}
-    ${S.mp ? `<div class="g-board" data-board>${boardHtml()}</div>` : ''}
-    ${ingInfo(ing)}
-    <div class="g-cta"><div class="g-max mono">Total <b>${S.total.toLocaleString()}</b> / ${(S.rounds.length * MAX).toLocaleString()}</div>${nextBtn()}</div>`;
-  gameEl.querySelector('.g-q')?.remove();
-  gameEl.querySelectorAll('.g-steps i')[S.i]?.classList.add('done');
-  gameEl.querySelectorAll('.g-steps i')[S.i]?.style.setProperty("--q", Math.min(1, points / MAX));
-  gameEl.querySelector('.g-total').textContent = `${S.total.toLocaleString()} pts`;
-  const tag = gameEl.querySelector('#g-hero .tag'); if (tag) tag.textContent = `${ing.place}, ${ing.country}`;
-  countUp(gameEl.querySelector('.g-num'));
-  gameEl.querySelectorAll('.g-line b[data-count]').forEach((el, k) => setTimeout(() => countUp(el), 250 + k * 260));
-  gameTop();
-}
-// distance ruler: log scale from 10 km to 20,000 km, with the score tiers marked
-const rulerX = (km) => Math.max(0, Math.min(1, Math.log10(Math.max(10, km) / 10) / Math.log10(2000)));
-function resultCard(km, res, ing) {
-  const [, label, col] = tierOf(km), sc = res.sc;
-  const ticks = [50, 300, 1000, 2500, 5000];
-  const lines = [
-    ['Distance', km == null ? 'no pin' : kmText(km), sc.distance, ''],
-    ...(S.free ? [['Free hint', 'first clue', 0, 'free']] : []),
-    ...(sc.paid ? [[`${sc.paid} hint${sc.paid > 1 ? 's' : ''}`, `−${Math.round(CLUE_COST * 100 * sc.paid)}%`, -sc.hints, 'neg']] : []),
-    ...(S.timed ? [['Speed bonus', km == null ? 'out of time' : sc.speed ? `${res.left}s left` : 'too far for a bonus', sc.speed, sc.speed ? 'pos' : '']] : []),
-  ];
-  return `<div class="g-result" style="--c:${col}">
-      <div class="g-score"><div><span class="g-v">${label}</span><span class="mono muted">${km == null ? 'No pin dropped' : `${kmText(km)} from ${A.esc(ing.place.split(',')[0])}`}</span></div>
-        <div class="g-num mono" data-count="${res.points}">0</div></div>
-      ${km == null ? '' : `<div class="g-ruler" style="--x:${rulerX(km)}"><div class="g-track">${ticks.map((d) => `<i style="left:${rulerX(d) * 100}%"></i>`).join('')}<b class="g-mark"><span>${kmText(km)}</span></b></div>
-        <div class="g-ticks mono">${['50', '300', '1k', '2.5k', '5k km'].map((t, k) => `<span style="left:${rulerX(ticks[k]) * 100}%">${t}</span>`).join('')}</div></div>`}
-      <div class="g-lines">${lines.map(([k, v, n, cls]) => `<div class="g-line ${cls}"><span>${k}</span><span class="mono muted">${v}</span><b class="mono" ${n ? `data-count="${n}" data-sign="${n > 0 && cls === 'pos' ? '+' : ''}"` : ''}>${n ? '0' : cls === 'free' ? '0' : '—'}</b></div>`).join('')}
-        <div class="g-line total"><span>Round score</span><span></span><b class="mono">${res.points.toLocaleString()}</b></div></div>
-    </div>`;
-}
-function countUp(el) {
-  if (!el) return;
-  const to = +el.dataset.count, t0 = performance.now(), dur = matchMedia('(prefers-reduced-motion: reduce)').matches ? 1 : 900;
-  const sign = el.dataset.sign || '', step = (t) => { const k = Math.min(1, (t - t0) / dur), e = 1 - Math.pow(1 - k, 3), v = Math.round(to * e); el.textContent = (v < 0 ? '−' : sign) + Math.abs(v).toLocaleString(); if (k < 1) requestAnimationFrame(step); };
-  requestAnimationFrame(step);
-}
-
-const RANKS = [[23000, 'Master perfumer', 'You could source a whole collection from memory.'], [18000, 'Nose', 'Trained, confident and rarely more than a country off.'],
-  [12500, 'Perfumery student', 'You know your regions. A few notes pulled you off course.'], [7000, 'Fragrance lover', 'Good instincts, with room to wander the atlas.'], [0, 'Curious traveller', 'Every expert started somewhere. Explore the atlas and try again.']];
-const square = (p) => (p >= 4000 ? '🟩' : p >= 2500 ? '🟨' : p >= 1000 ? '🟧' : '🟥');
-
-function summary() {
-  if (S.mp) return standings();
-  S.phase = 'done'; clearInterval(timer);
-  const max = S.rounds.length * MAX, [, rank, line] = RANKS.find(([n]) => S.total >= n * (max / 25000));
-  const key = `best:${S.mode}`, prev = S.bonus ? 0 : store.get(key) || 0, isBest = !S.bonus && S.total > prev;
-  if (isBest) store.set(key, S.total);
-  if (S.bonus) { store.set(`geo:${S.bonus}`, { ...store.get(`geo:${S.bonus}`), done: 1 }); A.saved?.(); }
-  const label = S.bonus ? 'Daily bonus' : MODES[S.mode].label;
-  vignette?.stop(); vignette = null;
-  A.setTint(null);
-  setPins(S.results.flatMap((r, k) => [...(r.guess ? [{ loc: r.guess, kind: 'guess', small: true, text: String(k + 1) }] : []), { loc: r.ing.loc, kind: 'answer', ing: r.ing, text: r.ing.name }]));
-  fxItems = []; const t0 = performance.now() + 700;
-  S.results.forEach((r, k) => { if (r.guess) fxItems.push({ type: 'arc', from: r.guess, to: r.ing.loc, t0: t0 + k * 380, dur: 900, color: A.ingHex(r.ing), keep: true }); });
-  if (S.total >= S.rounds.length * MAX * 0.7) fxItems.push({ type: 'confetti', t0: t0 + 600, parts: confetti(), colors: [accent, '#4f8f63', '#e2a336', '#8e4ec6', '#0090ff'] });
-  showSplash(`<span class="mono">Final score</span><b>${S.total.toLocaleString()}</b>`);
-  A.play.ver++; A.refresh();
-  A.flyTo(A.midpoint(S.results.map((r) => r.ing.loc)), 0.95);
-  hud.innerHTML = `<span class="mono muted">${label}</span><span class="g-hq"><b>${S.total.toLocaleString()}</b> / ${max.toLocaleString()} · ${rank}</span>`;
-  fab.textContent = S.bonus ? 'Back to today’s scent' : 'Play again'; fab.classList.add('ready'); fab.disabled = false;
-  gameEl.innerHTML = `
+    </div>`,V(),q(h.querySelector(".game")),q(h.querySelector(".body"));const n=h.querySelector("#g-hero"),l=n.querySelector(".model");C?.stop(),C=null;const m=n.querySelector("canvas.vignette");m&&(C=o.createVignette(m,s)),o.getStage().then(u=>{if(!u||!l.isConnected){n.classList.add("no-3d");return}u.mount(l);const g=o.isDark();if(e.frag){const d=o.fragHex(e.frag),c=[s,...e.frag.ingredients.filter(p=>p!==s.id).slice(0,2).map(p=>o.ING[p])];u.showFragrance(e.frag,o.liquidFor(e.frag),c,g?o.mix(d,"#332c27",.8):o.mix(d,"#ffffff",.88),d,g?[o.mix(d,"#141110",.82),o.mix(d,"#1d1916",.72)]:[o.mix(d,"#fffdfa",.84),o.mix(d,"#f3ede4",.7)])}else u.showIngredient(s,o.ingHex(s),g?o.mix(o.ingHex(s),"#2a2a2e",.78):o.mix(o.ingHex(s),"#ffffff",.82),a?{title:`Specimen ${String.fromCharCode(65+t.i)}`,sub:"origin unknown"}:void 0);u.ready().then(()=>requestAnimationFrame(()=>n.classList.add("loaded")))})}function _(){if(!t)return;const e=t.rounds[t.i];if(t.phase==="guess")L.innerHTML=`${ot()}${t.mp?`<span class="g-chips">${jt()}</span>`:""}<span class="g-hq">${nt(e)}</span>${t.timed?`<span class="g-ring${t.left<=Math.min(10,t.time/3)?" low":""}" style="--p:${t.left/t.time}"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15"/><circle cx="18" cy="18" r="15"/></svg><b class="mono">${t.left}</b></span>`:""}`,S.textContent=t.guess?"Lock in guess":"Tap the globe to drop a pin",S.disabled=!t.guess,S.classList.toggle("ready",!!t.guess);else if(t.phase==="reveal"){const s=t.results[t.i];L.innerHTML=`${ot()}<span class="g-hq"><b>${o.esc(e.ing.name)}</b> · ${o.esc(e.ing.place)}, ${o.esc(e.ing.country)}</span><span class="g-pts mono">+${s.points.toLocaleString()}</span>`;const a=Pt();S.textContent=a.label,S.disabled=!a.ok,S.classList.toggle("ready",a.ok)}else if(t.phase==="pass"){const s=t.mp.players[t.mp.turn+1];L.innerHTML=`${ot()}<span class="g-hq">Pass the device to <b>${o.esc(s.nm)}</b></span>`,S.textContent=`I'm ${s.nm}, show my round`,S.disabled=!1,S.classList.add("ready")}L.classList.add("show"),S.classList.add("show"),S.hidden=!1}function ot(){return`<span class="g-dots">${t.rounds.map((e,s)=>{const a=t.results[s];return`<i class="${s===t.i&&t.phase!=="done"?"cur":""}" style="${a?`--c:${a.points>=4e3?"#4f8f63":a.points>=2500?"#e2a336":a.points>=1e3?"#f76b15":"#c4513f"}`:""}"></i>`}).join("")}</span>`}function da(e){if(t?.phase!=="guess")return;t.guess=e,o.play.ver++,o.refresh(),B([{loc:e,kind:"guess"}]),w.push({type:"ripple",loc:e,t0:performance.now(),color:O});const s=h.querySelector('[data-act="guess"]');s&&(s.disabled=!1,s.textContent="Lock in guess"),_()}function je(){const e=t.rounds[t.i],s=e.ing,a=t.guess?o.haversine(t.guess,s.loc):null,r=qe({km:a,clues:t.clues,free:t.free,timed:t.timed,left:t.left,time:t.time});return{ing:s,frag:e.frag,guess:t.guess,km:a,points:r.points,clues:t.clues,sc:r,left:t.left}}function Ie(e){if(t?.phase!=="guess"||!t.guess&&!e)return;if(clearInterval(x),t.mp?.kind==="local")return dn();const s=t.rounds[t.i],a=s.ing,r=je(),i=r.km,n=r.points;t.results.push(r),t.total+=n,t.phase="reveal",t.bonus&&$.set(`geo:${t.bonus}`,{rounds:t.results.map(d=>({id:d.ing.id,guess:d.guess,km:d.km,points:d.points}))}),t.mp&&Ut(),o.play.ver++,o.refresh();const l=t.results[t.i],m=performance.now(),u=o.ingHex(a);B(t.guess?[{loc:t.guess,kind:"guess"}]:[]);const g=()=>{if(t?.results[t.i]!==l)return;const d=performance.now();l.arrived=!0,o.play.ver++,o.refresh(),B(Rt(!0)),t.mp&&(t.mp.pinKey=zt()),t.guess&&w.push({type:"label",from:t.guess,to:a.loc,t0:d,text:oe(i),color:Xt(i)[2]}),w.push({type:"burst",loc:a.loc,t0:d,color:u,parts:Ct(n>=4e3?34:20)}),w.push({type:"float",loc:a.loc,t0:d,text:`+${n.toLocaleString()}`,color:u}),n>=4500&&w.push({type:"confetti",t0:d,parts:ke(),colors:[u,...a.c,O]})};if(t.guess?w.push({type:"arc",from:t.guess,to:a.loc,t0:m+450,dur:Math.min(1700,700+i/12),color:u,done:g,keep:!0}):setTimeout(g,600),t.guess){const d=i<400?2.8:i<1200?2.1:i<3e3?1.5:i<7e3?1.1:.9;o.flyTo(o.midpoint([t.guess,a.loc]),d)}else o.flyTo(a.loc,1.8);ua(i,l),_()}function rs(e){const s=o.USES[e.id],a=s.slice().sort((r,i)=>r.f.name.localeCompare(i.f.name)).slice(0,6);return`<div><h2 class="title">${o.esc(e.name)}</h2><div class="latin">${o.esc(e.latin)}</div></div>
+    <div class="badges"><span class="badge"><span class="dot" style="background:${o.ingHex(e)}"></span>${R[e.family].label}</span><span class="badge soft">${o.esc(e.place)}</span><span class="badge soft">${o.esc(e.country)}</span></div>
+    <p class="prose">${o.esc(e.about)}</p>
+    <div class="section-h"><span>Goes into ${s.length} perfume${s.length===1?"":"s"} in the atlas</span></div>
+    <div class="notes">${a.map(r=>`<span class="badge note">${o.esc(r.f.name)} <span class="mono muted">${o.esc(r.f.house)}</span></span>`).join("")}${s.length>a.length?`<span class="badge soft mono">+${s.length-a.length} more</span>`:""}</div>`}function ua(e,s){const a=s.points,r=t.rounds[t.i],i=r.ing,n=h.querySelector(".body");n.innerHTML=`
+    ${pa(e,s,i)}
+    ${t.mp?`<div class="g-board" data-board>${It()}</div>`:""}
+    ${rs(i)}
+    <div class="g-cta"><div class="g-max mono">Total <b>${t.total.toLocaleString()}</b> / ${(t.rounds.length*A).toLocaleString()}</div>${Us()}</div>`,h.querySelector(".g-q")?.remove(),h.querySelectorAll(".g-steps i")[t.i]?.classList.add("done"),h.querySelectorAll(".g-steps i")[t.i]?.style.setProperty("--q",Math.min(1,a/A)),h.querySelector(".g-total").textContent=`${t.total.toLocaleString()} pts`;const l=h.querySelector("#g-hero .tag");l&&(l.textContent=`${i.place}, ${i.country}`),Pe(h.querySelector(".g-num")),h.querySelectorAll(".g-line b[data-count]").forEach((m,u)=>setTimeout(()=>Pe(m),250+u*260)),V()}const rt=e=>Math.max(0,Math.min(1,Math.log10(Math.max(10,e)/10)/Math.log10(2e3)));function pa(e,s,a){const[,r,i]=Xt(e),n=s.sc,l=[50,300,1e3,2500,5e3],m=[["Distance",e==null?"no pin":oe(e),n.distance,""],...t.free?[["Free hint","first clue",0,"free"]]:[],...n.paid?[[`${n.paid} hint${n.paid>1?"s":""}`,`−${Math.round(Ae*100*n.paid)}%`,-n.hints,"neg"]]:[],...t.timed?[["Speed bonus",e==null?"out of time":n.speed?`${s.left}s left`:"too far for a bonus",n.speed,n.speed?"pos":""]]:[]];return`<div class="g-result" style="--c:${i}">
+      <div class="g-score"><div><span class="g-v">${r}</span><span class="mono muted">${e==null?"No pin dropped":`${oe(e)} from ${o.esc(a.place.split(",")[0])}`}</span></div>
+        <div class="g-num mono" data-count="${s.points}">0</div></div>
+      ${e==null?"":`<div class="g-ruler" style="--x:${rt(e)}"><div class="g-track">${l.map(u=>`<i style="left:${rt(u)*100}%"></i>`).join("")}<b class="g-mark"><span>${oe(e)}</span></b></div>
+        <div class="g-ticks mono">${["50","300","1k","2.5k","5k km"].map((u,g)=>`<span style="left:${rt(l[g])*100}%">${u}</span>`).join("")}</div></div>`}
+      <div class="g-lines">${m.map(([u,g,d,c])=>`<div class="g-line ${c}"><span>${u}</span><span class="mono muted">${g}</span><b class="mono" ${d?`data-count="${d}" data-sign="${d>0&&c==="pos"?"+":""}"`:""}>${d||c==="free"?"0":"—"}</b></div>`).join("")}
+        <div class="g-line total"><span>Round score</span><span></span><b class="mono">${s.points.toLocaleString()}</b></div></div>
+    </div>`}function Pe(e){if(!e)return;const s=+e.dataset.count,a=performance.now(),r=matchMedia("(prefers-reduced-motion: reduce)").matches?1:900,i=e.dataset.sign||"",n=l=>{const m=Math.min(1,(l-a)/r),u=1-Math.pow(1-m,3),g=Math.round(s*u);e.textContent=(g<0?"−":i)+Math.abs(g).toLocaleString(),m<1&&requestAnimationFrame(n)};requestAnimationFrame(n)}const is=[[23e3,"Master perfumer","You could source a whole collection from memory."],[18e3,"Nose","Trained, confident and rarely more than a country off."],[12500,"Perfumery student","You know your regions. A few notes pulled you off course."],[7e3,"Fragrance lover","Good instincts, with room to wander the atlas."],[0,"Curious traveller","Every expert started somewhere. Explore the atlas and try again."]],be=e=>e>=4e3?"🟩":e>=2500?"🟨":e>=1e3?"🟧":"🟥";function ls(){if(t.mp)return Ks();t.phase="done",clearInterval(x);const e=t.rounds.length*A,[,s,a]=is.find(([u])=>t.total>=u*(e/25e3)),r=`best:${t.mode}`,i=t.bonus?0:$.get(r)||0,n=!t.bonus&&t.total>i;n&&$.set(r,t.total),t.bonus&&($.set(`geo:${t.bonus}`,{...$.get(`geo:${t.bonus}`),done:1}),o.saved?.());const l=t.bonus?"Daily bonus":z[t.mode].label;C?.stop(),C=null,o.setTint(null),B(t.results.flatMap((u,g)=>[...u.guess?[{loc:u.guess,kind:"guess",small:!0,text:String(g+1)}]:[],{loc:u.ing.loc,kind:"answer",ing:u.ing,text:u.ing.name}])),w=[];const m=performance.now()+700;t.results.forEach((u,g)=>{u.guess&&w.push({type:"arc",from:u.guess,to:u.ing.loc,t0:m+g*380,dur:900,color:o.ingHex(u.ing),keep:!0})}),t.total>=t.rounds.length*A*.7&&w.push({type:"confetti",t0:m+600,parts:ke(),colors:[O,"#4f8f63","#e2a336","#8e4ec6","#0090ff"]}),ie(`<span class="mono">Final score</span><b>${t.total.toLocaleString()}</b>`),o.play.ver++,o.refresh(),o.flyTo(o.midpoint(t.results.map(u=>u.ing.loc)),.95),L.innerHTML=`<span class="mono muted">${l}</span><span class="g-hq"><b>${t.total.toLocaleString()}</b> / ${e.toLocaleString()} · ${s}</span>`,S.textContent=t.bonus?"Back to today’s scent":"Play again",S.classList.add("ready"),S.disabled=!1,h.innerHTML=`
     <div class="game">
       <div class="detail-top"><button class="btn icon ghost" data-act="lobby" aria-label="Back to game menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
         <div class="crumbs"><span>Fraguessr</span><span>/</span><b>Results</b></div></div>
       <div class="g-final">
-        <span class="mono muted">${S.bonus ? `Daily bonus · ${dailyName(S.bonus)}` : `${label} · ${today()}`}</span>
-        <div class="g-big mono" data-count="${S.total}">0</div>
-        <div class="g-meter"><i style="--p:${Math.min(1, S.total / max)}"></i></div>
-        <h2 class="title">${rank}</h2><p class="prose">${line}${isBest && prev ? ` New personal best, up from ${prev.toLocaleString()}.` : ''}</p>
+        <span class="mono muted">${t.bonus?`Daily bonus · ${we(t.bonus)}`:`${l} · ${D()}`}</span>
+        <div class="g-big mono" data-count="${t.total}">0</div>
+        <div class="g-meter"><i style="--p:${Math.min(1,t.total/e)}"></i></div>
+        <h2 class="title">${s}</h2><p class="prose">${a}${n&&i?` New personal best, up from ${i.toLocaleString()}.`:""}</p>
       </div>
       <div class="body">
-        <div class="g-table">${S.results.map((r, k) => `
-          <div class="g-row" style="--c:${A.ingHex(r.ing)};--i:${k}"><span class="g-n mono">${k + 1}</span><span class="dot" style="background:${A.ingHex(r.ing)}"></span>
-            <span class="g-nm">${A.esc(r.ing.name)}<span>${r.frag ? `${A.esc(r.frag.name)} · ` : ''}${A.esc(r.ing.country)}</span></span>
-            <span class="g-km mono">${r.km == null ? '—' : `${Math.round(r.km).toLocaleString()} km`}</span><span class="g-p mono">${r.points.toLocaleString()}</span>
-            <i class="g-rb" style="--p:${Math.min(1, r.points / MAX)}"></i></div>`).join('')}</div>
-        ${S.bonus ? '' : `<div class="g-share"><code id="g-sharetext">${shareText(rank)}</code></div>`}
-        <div class="g-actions">${S.bonus ? `<button class="btn primary" data-act="lobby">Back to today’s scent</button></div>` : `
+        <div class="g-table">${t.results.map((u,g)=>`
+          <div class="g-row" style="--c:${o.ingHex(u.ing)};--i:${g}"><span class="g-n mono">${g+1}</span><span class="dot" style="background:${o.ingHex(u.ing)}"></span>
+            <span class="g-nm">${o.esc(u.ing.name)}<span>${u.frag?`${o.esc(u.frag.name)} · `:""}${o.esc(u.ing.country)}</span></span>
+            <span class="g-km mono">${u.km==null?"—":`${Math.round(u.km).toLocaleString()} km`}</span><span class="g-p mono">${u.points.toLocaleString()}</span>
+            <i class="g-rb" style="--p:${Math.min(1,u.points/A)}"></i></div>`).join("")}</div>
+        ${t.bonus?"":`<div class="g-share"><code id="g-sharetext">${cs(s)}</code></div>`}
+        <div class="g-actions">${t.bonus?'<button class="btn primary" data-act="lobby">Back to today’s scent</button></div>':`
           <button class="btn" data-act="share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy result</button>
           <button class="btn primary" data-act="again"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>Play a new game</button>
         </div>`}
         <button class="btn ghost" data-act="exit">Back to the atlas</button>
       </div>
-    </div>`;
-  countUp(gameEl.querySelector('.g-big'));
-  gameTop();
-  enter(gameEl.querySelector('.game')); enter(gameEl.querySelector('.g-table')); enter(gameEl.querySelector('.body'));
-}
-function shareText(rank) {
-  return `Fraguessr · ${MODES[S.mode].label}${S.timed ? ` · ${S.time}s` : ''}\n${S.results.map((r) => square(r.points)).join('')} ${S.total.toLocaleString()}/${(S.rounds.length * MAX).toLocaleString()}\n${rank}`;
-}
-
-function again() {
-  const mode = S?.mode || 'notes', timed = S?.timed;
-  const seed = (Math.random() * 2 ** 32) >>> 0;
-  S = rules({ mode, timed, seed, rounds: buildRounds(mode, seed, A.USES), i: -1, results: [], total: 0 });
-  next();
-}
-
-// ── daily scent: one famous perfume a day, name its notes ─────
-// Five chances. One hidden note always carries a clue (its tier, family and source country); finding that note
-// passes a fresh clue to another one. A wrong note costs a chance and sharpens the clue. A right one reveals the
-// note, flies the globe to where it grows and deals one of its fun facts, drawn by the same rarity odds as a blend.
-const SCENT_LIVES = 5, SCENT_MIN = 5, SCENT_MAX = 19;
-const SCENT_POOL = ['chanel-no-5', 'chanel-coco-mademoiselle', 'chanel-bleu-de-chanel-edp', 'chanel-chance', 'chanel-allure-homme-sport', 'chanel-egoiste', 'chanel-no-19', 'chanel-coco-noir', 'chanel-coco', 'chanel-allure',
-  'dior-sauvage-edt', 'dior-sauvage-elixir', 'dior-miss-dior-blooming-bouquet', 'dior-poison', 'dior-hypnotic-poison', 'dior-eau-sauvage', 'dior-diorissimo', 'dior-dune', 'dior-dolce-vita',
-  'yves-saint-laurent-black-opium', 'yves-saint-laurent-libre', 'yves-saint-laurent-y-eau-de-parfum', 'yves-saint-laurent-mon-paris', 'yves-saint-laurent-paris', 'guerlain-shalimar', 'guerlain-mitsouko', 'guerlain-la-petite-robe-noire',
-  'guerlain-samsara', 'guerlain-jicky', 'guerlain-l-homme-ideal', 'guerlain-apres-l-ondee', 'hermes-terre-d-hermes', 'hermes-un-jardin-sur-le-nil', 'hermes-eau-d-orange-verte', 'tom-ford-oud-wood', 'tom-ford-lost-cherry', 'tom-ford-neroli-portofino',
-  'tom-ford-tuscan-leather', 'tom-ford-noir-extreme', 'tom-ford-grey-vetiver', 'tom-ford-ombre-leather', 'creed-aventus', 'creed-green-irish-tweed', 'creed-silver-mountain-water', 'maison-francis-kurkdjian-baccarat-rouge-540',
-  'maison-francis-kurkdjian-oud-satin-mood', 'le-labo-santal-33', 'le-labo-another-13', 'le-labo-rose-31', 'le-labo-the-noir-29', 'byredo-gypsy-water', 'byredo-bal-d-afrique', 'byredo-mojave-ghost', 'jo-malone-london-wood-sage-sea-salt',
-  'jo-malone-london-english-pear-freesia', 'jo-malone-london-lime-basil-mandarin', 'giorgio-armani-acqua-di-gio-profumo', 'giorgio-armani-si', 'giorgio-armani-armani-code', 'giorgio-armani-stronger-with-you', 'rabanne-1-million', 'rabanne-invictus',
-  'rabanne-lady-million', 'jean-paul-gaultier-le-male', 'jean-paul-gaultier-classique', 'jean-paul-gaultier-scandal', 'jean-paul-gaultier-ultra-male', 'viktor-rolf-flowerbomb', 'viktor-rolf-spicebomb', 'mugler-a-men', 'lancome-la-vie-est-belle',
-  'lancome-tresor', 'lancome-idole', 'prada-infusion-d-iris', 'prada-paradoxe', 'gucci-rush', 'gucci-guilty', 'gucci-flora-by-gucci', 'gucci-bamboo', 'calvin-klein-ck-one', 'calvin-klein-eternity', 'calvin-klein-euphoria', 'davidoff-cool-water',
-  'davidoff-cool-water-woman', 'hugo-boss-boss-bottled', 'versace-eros', 'versace-bright-crystal', 'versace-dylan-blue', 'dolce-gabbana-light-blue', 'dolce-gabbana-the-one-for-men', 'narciso-rodriguez-for-her', 'marc-jacobs-daisy',
-  'kenzo-flower-by-kenzo', 'issey-miyake-l-eau-d-issey', 'estee-lauder-beautiful', 'estee-lauder-white-linen', 'estee-lauder-pleasures', 'clinique-happy', 'diptyque-do-son', 'diptyque-tam-dao', 'serge-lutens-ambre-sultan', 'serge-lutens-chergui',
-  'frederic-malle-portrait-of-a-lady', 'frederic-malle-carnal-flower', 'maison-margiela-replica-jazz-club', 'maison-margiela-replica-by-the-fireplace', 'parfums-de-marly-layton', 'parfums-de-marly-delina', 'kilian-paris-love-don-t-be-shy',
-  'amouage-interlude-man', 'acqua-di-parma-colonia', 'ralph-lauren-polo', 'givenchy-l-interdit', 'givenchy-gentleman-eau-de-parfum', 'givenchy-pi', 'chloe-chloe-eau-de-parfum', 'burberry-her', 'montblanc-explorer', 'montblanc-legend',
-  'nina-ricci-l-air-du-temps', 'ariana-grande-cloud', 'kayali-vanilla-28', 'valentino-born-in-roma-donna', 'azzaro-wanted', 'azzaro-pour-homme', 'dkny-be-delicious', 'lanvin-arpege', 'jean-patou-joy', 'robert-piguet-fracas',
-  'cacharel-anais-anais', 'lolita-lempicka-lolita-lempicka', 'guy-laroche-drakkar-noir', 'lattafa-khamrah', 'armaf-club-de-nuit-intense-man', 'carolina-herrera-bad-boy', 'elizabeth-arden-green-tea', 'britney-spears-fantasy', 'nautica-nautica-voyage'];
-// rarer notes score more, like a rare answer: how rare a note is = how few of the atlas's perfumes list it
-const RARE = [[60, 'Classic', 100, '🟩'], [25, 'Common', 150, '🟩'], [8, 'Uncommon', 250, '🟦'], [0, 'Rare', 400, '🟪']], DROP_BONUS = 50;
-let useN = null;
-const usesOf = (id) => (useN ||= FRAGRANCES.reduce((m, f) => { for (const i of new Set(f.ingredients)) m[i] = (m[i] || 0) + 1; return m; }, {}))[id] || 0;
-const rareOf = (id) => { const n = usesOf(id), [, label, pts, sq] = RARE.find(([k]) => n >= k); return { label, pts, sq, pct: Math.max(1, Math.round(100 * n / FRAGRANCES.length)) }; };
-// the day's score: every note found by its rarity, plus a bonus for each drop left when every note is found
-function scentPoints(found, lives, total) { const notes = found.reduce((a, id) => a + rareOf(id).pts, 0); return { notes, bonus: found.length === total ? lives * DROP_BONUS : 0, total: notes + (found.length === total ? lives * DROP_BONUS : 0) }; }
-const TIER_NAME = { top: 'Top', heart: 'Heart', base: 'Base' };
-const SMELL = {
-  top: { citrus: 'a bright, zesty burst', floral: 'a soft floral lift', green: 'a crisp green snap', fruit: 'a juicy, fruity splash', spice: 'a warm, peppery spark', wood: 'a dry woody hush', resin: 'a glowing balsamic warmth', gourmand: 'a sweet, edible hello', animalic: 'a skin-warm musky hum', marine: 'a breezy, salty splash' },
-  heart: { citrus: 'a sparkling citrus heart', floral: 'a heart of blooming flowers', green: 'a leafy, herbal heart', fruit: 'a ripe, fruity heart', spice: 'a heart of warm spices', wood: 'a heart of polished woods', resin: 'a smoky, resinous heart', gourmand: 'a creamy, sweet heart', animalic: 'a sensual animalic heart', marine: 'a cool, watery heart' },
-  base: { citrus: 'a clean, bright drydown', floral: 'a powdery floral drydown', green: 'a mossy, earthy drydown', fruit: 'a jammy drydown', spice: 'a spiced drydown', wood: 'a smooth woody drydown', resin: 'a warm amber drydown', gourmand: 'a sweet, cosy drydown', animalic: 'a soft musky drydown', marine: 'a mineral, salty drydown' },
-};
-const VERDICT = [[1, 'Perfect nose', 'Every note named. You could have written the formula.'], [0.75, 'Nose', 'Only a note or two got past you.'], [0.5, 'Perfumery student', 'You caught the heart of it.'],
-  [0.25, 'Fragrance lover', 'A good sniff. The rest is now in your collection.'], [0, 'Curious traveller', 'A tricky one. Every note you found today is yours to keep.']];
-// lower-case the first letter unless the word is an acronym or a proper name in caps ("CO2", "Rose de Mai" stays readable)
-const lc = (w) => (/^\p{Lu}\p{Ll}/u.test(w) ? w.charAt(0).toLowerCase() + w.slice(1) : w);
-const an = (w) => (/^[aeiou]/i.test(w) ? 'an ' : 'a ') + w;
-const listText = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
-const famHex = (fm) => '#' + FAMILIES[fm].color.map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
-const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-const prevDay = (d) => new Date(Date.parse(d) - 864e5).toISOString().slice(0, 10);
-const dayLabel = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-
-// the perfume's notes in pyramid order; one with no single place of origin (aldehydes, ambroxan...) is shown from the start
-function scentNotes(f) {
-  const out = [], seen = new Set();
-  for (const t of ['top', 'heart', 'base']) for (const n of f.tiers[t]) {
-    const id = noteId(n);
-    if (!id || !ING_BY[id]) out.push({ t, n, given: true });
-    else if (!seen.has(id)) { seen.add(id); out.push({ t, n, id }); }
-  }
-  return out;
-}
-const scentSize = (f) => scentNotes(f).filter((x) => x.id).length;
-let scentOrder = null;
-const ING_BY = Object.fromEntries(INGREDIENTS.map((i) => [i.id, i]));
-// today's perfume, for the welcome card (works before the game has opened)
-export const todayScent = () => scentOf(today());
-export const scentPoolIds = () => scentPool().map((f) => f.id); // for the build script that pre-renders the bottles
-// for the opening page: today's perfume and where this player stands with it
-export function dailyInfo() {
-  const d = today(), f = scentOf(d), st = store.get(`scent:${d}`), streak = store.get('scent:streak');
-  const done = st?.id === f.id && !!st.over, started = st?.id === f.id && !!st.log.length, got = started ? st.log.filter((e) => e.hit).length : 0;
-  return { id: f.id, name: f.name, house: f.house, label: dailyName(d), total: scentSize(f), notes: [...f.ingredients], got, done, started,
-    streak: streak && (streak.last === d || streak.last === prevDay(d)) ? streak.n : 0 };
-}
-// practice games also deal these (added later); they stay out of SCENT_POOL so the daily order never changes
-const SCENT_MORE = [
-  'chanel-bleu-de-chanel-parfum', 'chanel-sycomore', 'chanel-coromandel', 'chanel-bois-des-iles', 'chanel-allure-homme-edition-blanche', 'dior-addict', 'dior-oud-ispahan', 'dior-dior-homme-parfum',
-  'dior-miss-dior-eau-de-parfum', 'dior-dior-homme-sport', 'yves-saint-laurent-l-homme', 'yves-saint-laurent-rive-gauche', 'yves-saint-laurent-tuxedo', 'yves-saint-laurent-libre-intense',
-  'guerlain-spiritueuse-double-vanille', 'guerlain-angelique-noire', 'guerlain-insolence', 'tom-ford-fucking-fabulous', 'tom-ford-cafe-rose', 'tom-ford-costa-azzurra', 'tom-ford-tobacco-oud',
-  'tom-ford-beau-de-jour', 'creed-viking', 'creed-aventus-for-her', 'creed-himalaya', 'maison-francis-kurkdjian-a-la-rose', 'maison-francis-kurkdjian-724',
-  'maison-francis-kurkdjian-gentle-fluidity-gold', 'hermes-kelly-caleche', 'hermes-bel-ami', 'giorgio-armani-stronger-with-you-intensely', 'giorgio-armani-armani-code-profumo', 'rabanne-pour-homme',
-  'rabanne-black-xs', 'rabanne-invictus-victory', 'versace-eros-flame', 'versace-man-eau-fraiche', 'versace-yellow-diamond', 'dolce-gabbana-dolce', 'dolce-gabbana-k-by-dolce-gabbana',
-  'dolce-gabbana-light-blue-eau-intense', 'givenchy-ange-ou-demon', 'givenchy-amarige', 'givenchy-irresistible', 'burberry-brit-for-her', 'burberry-mr-burberry', 'lancome-hypnose',
-  'lancome-magie-noire', 'gucci-memoire-d-une-odeur', 'gucci-envy', 'prada-prada-amber', 'prada-luna-rossa-black', 'calvin-klein-eternity-for-men', 'calvin-klein-ck-be',
-  'bvlgari-eau-parfumee-au-the-vert', 'bvlgari-omnia-amethyste', 'narciso-rodriguez-narciso', 'narciso-rodriguez-for-him-bleu-noir', 'azzaro-chrome', 'viktor-rolf-bonbon', 'ralph-lauren-polo-blue',
-  'ralph-lauren-polo-red', 'le-labo-lys-41', 'le-labo-patchouli-24', 'le-labo-vetiver-46', 'le-labo-ylang-49', 'jo-malone-london-pomegranate-noir', 'jo-malone-london-nectarine-blossom-honey',
-  'jo-malone-london-orange-blossom', 'diptyque-l-ombre-dans-l-eau', 'diptyque-eau-duelle', 'parfums-de-marly-percival', 'maison-margiela-replica-bubble-bath',
-  'maison-margiela-replica-when-the-rain-stops', 'montale-black-aoud', 'mancera-red-tobacco', 'louis-vuitton-ombre-nomade', 'bdk-parfums-rouge-smoking', 'etat-libre-d-orange-fat-electrician',
-  'etat-libre-d-orange-you-or-someone-like-you', 'tiziana-terenzi-kirke', 'roja-parfums-elysium-pour-homme', 'maison-crivelli-hibiscus-mahajad', 'vilhelm-parfumerie-mango-skin',
-  'histoires-de-parfums-1740-marquis-de-sade', 'nasomatto-black-afgano', 'orto-parisi-megamare', 'maison-louis-marie-no-04-bois-de-balincourt', 'clive-christian-x-for-men',
-  'penhaligon-s-the-tragedy-of-lord-george', 'xerjoff-accento', 'lacoste-l-12-12-blanc', 'lacoste-lacoste-pour-femme', 'miu-miu-miu-miu', 'coach-coach-eau-de-parfum', 'coach-coach-for-men',
-  'michael-kors-michael-kors', 'tiffany-co-tiffany-co-eau-de-parfum', 'abercrombie-fitch-fierce', 'bath-body-works-japanese-cherry-blossom', 'billie-eilish-eilish', 'stella-mccartney-stella',
-  'phlur-missing-person', 'salvatore-ferragamo-uomo', 'paris-hilton-paris-hilton', 'jennifer-lopez-glow', 'beyonce-heat', 'taylor-swift-wonderstruck', 'elizabeth-taylor-white-diamonds',
-  'clinique-aromatics-elixir', 'avon-far-away', 'cartier-pasha-de-cartier', 'cartier-must-de-cartier', 'van-cleef-arpels-first', 'ariana-grande-r-e-m', 'sabrina-carpenter-sweet-tooth',
-  'hollister-wave', 'mercedes-benz-mercedes-benz-man', 'ferrari-scuderia-ferrari-black', 'jimmy-choo-jimmy-choo-man'
-];
-let practiceOrder;
-const practicePool = () => (practiceOrder ||= [...scentPool(), ...SCENT_MORE.map((id) => FRAGRANCES.find((f) => f.id === id)).filter((f) => f && scentSize(f) >= SCENT_MIN && scentSize(f) <= SCENT_MAX)]);
-function scentPool() {
-  if (scentOrder) return scentOrder;
-  const pool = SCENT_POOL.map((id) => FRAGRANCES.find((f) => f.id === id)).filter((f) => f && scentSize(f) >= SCENT_MIN && scentSize(f) <= SCENT_MAX), r = rng(hash('fraguessr:scent'));
-  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
-  return (scentOrder = pool);
-}
-// the same perfume for everyone on a given (UTC) day, working through the shuffled pool before any repeats
-function scentOf(d) { const p = scentPool(), n = Math.floor(Date.parse(d) / 864e5); return p[((n % p.length) + p.length) % p.length]; }
-
-// how it smells without naming a note: the leading family of each tier, plus the family balance overall
-function scentProfile(f, notes) {
-  const w = { top: 1, heart: 1.5, base: 2 }, all = {}, lead = {};
-  for (const t of ['top', 'heart', 'base']) {
-    const tally = {};
-    for (const x of notes) if (x.id && x.t === t) { const fm = A.ING[x.id].family; tally[fm] = (tally[fm] || 0) + 1; all[fm] = (all[fm] || 0) + w[t]; }
-    lead[t] = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0];
-  }
-  const fams = Object.entries(all).sort((a, b) => b[1] - a[1]), sum = fams.reduce((n, [, v]) => n + v, 0);
-  const steps = [['opens with', 'top'], ['moves into', 'heart'], ['settles into', 'base']].filter(([, t]) => lead[t]).map(([v, t]) => `${v} ${SMELL[t][lead[t]]}`);
-  const who = { Women: 'for women', Men: 'for men', Unisex: 'for everyone' }[f.audience] || '';
-  const { genre } = A.describe(f);
-  return { genre, fams: fams.map(([fm, v]) => ({ fm, p: v / sum })),
-    text: `${an(genre).replace(/^./, (c) => c.toUpperCase())} fragrance ${who}, created by ${f.house} in ${f.year}.${steps.length ? ` It ${listText(steps)}.` : ''}` };
-}
-
-// every name a note goes by (ingredient names and the aliases perfume lists use), for guessing and suggestions
-let noteIdx = null;
-function noteIndex() {
-  if (noteIdx) return noteIdx;
-  const m = new Map(), add = (k, v) => { const q = norm(k); if (q && !m.has(q)) m.set(q, v); };
-  for (const i of INGREDIENTS) { add(i.name, { label: i.name, id: i.id }); for (const part of i.name.split(/\s*[&(),]\s*/)) if (part.length > 2) add(part, { label: i.name, id: i.id }); }
-  for (const [k, id] of Object.entries(ALIASES)) if (A.ING[id]) add(k, { label: k.charAt(0).toUpperCase() + k.slice(1), id, alias: true });
-  return (noteIdx = m);
-}
-const words = (x) => [...norm(x.n).split(' '), ...norm(A.ING[x.id].name).split(' ')];
-function scentResolve(raw, id) {
-  const q = norm(raw || ''), notes = S.notes.filter((x) => x.id), hidden = notes.filter((x) => !S.found.has(x.id));
-  if (!q && !id) return null;
-  const known = id || noteIndex().get(q)?.id;
-  let hit = hidden.find((x) => x.id === known || norm(x.n) === q);
-  // a bare word like "rose" or "pepper" counts for a listed note it names ("rose de mai", "pink pepper")
-  if (!hit && !id && q.length >= 3 && !q.includes(' ')) hit = hidden.find((x) => words(x).includes(q));
-  if (hit) return { hit };
-  const had = notes.find((x) => S.found.has(x.id) && (x.id === known || norm(x.n) === q || (!id && words(x).includes(q))));
-  if (had) return { already: had };
-  if (!known) return { unknown: q };
-  if (S.tried.includes(known)) return { repeat: known };
-  return { miss: known };
-}
-
-function scentOpen(daily, fid) {
-  clearInterval(timer); clearPins(); vignette?.stop(); vignette = null; fxItems = [];
-  const d = today(), pool = practicePool();
-  const f = daily ? scentOf(d) : FRAGRANCES.find((x) => x.id === fid) || (() => { const others = pool.filter((x) => x !== scentOf(d) && x.id !== S?.f?.id); return others[Math.floor(Math.random() * others.length)]; })();
-  S = { kind: 'scent', phase: 'scent', daily, date: d, f, notes: scentNotes(f), found: new Set(), tried: [], hints: [], level: {}, target: null, lives: SCENT_LIVES, log: [], last: null, intro: true };
-  const saved = daily && store.get(`scent:${d}`);
-  scentSpot(true);
-  if (saved?.id === f.id) for (const e of saved.log) scentApply(e, true);
-  if (saved?.over) S.phase = 'done';
-  A.setHash(daily ? 'play-daily' : 'play');
-  A.setTint(A.fragHex(f));
-  A.play.ver++; A.refresh();
-  if (S.phase === 'done') scentFinish(true);
-  else { scentRender(); scentPins(null); scentLinks(null); A.flyTo([24, 20], 1); showSplash(`<span class="mono">${daily ? dailyName(d) : 'Practice scent'}</span><b>${A.esc(f.name)} <span class="g-sp-h">${A.esc(f.house)}</span></b>`); }
-}
-// one guess, live or replayed from today's saved log
-function scentApply(e, quiet) {
-  const x = S.notes.find((n) => n.id === e.id);
-  if (e.hit) { S.found.add(e.id); S.last = { id: e.id, r: e.r, isNew: !!e.isNew }; }
-  else { S.tried.push(e.id); S.lives--; if (S.lives > 0) scentHint(quiet); }
-  S.log.push(e);
-  if (S.lives <= 0 || S.notes.every((n) => !n.id || S.found.has(n.id))) S.phase = 'done';
-  else if (e.hit && S.target === e.id) { S.target = null; scentSpot(quiet); }
-  return x;
-}
-// the clue passes to another hidden note: picked by the day's seed, so everyone playing today follows the same
-// trail, with well-known notes a little likelier than obscure ones
-function scentSpot(quiet) {
-  const hidden = S.notes.filter((x) => x.id && !S.found.has(x.id));
-  if (!hidden.length) return;
-  S.spots = (S.spots || 0) + 1;
-  const r = rng([...`${S.f.id}|${S.date}|${S.spots}`].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261));
-  const w = hidden.map((x) => Math.sqrt(1 + A.USES[x.id].length)); let k = r() * w.reduce((a, b) => a + b, 0), i = 0;
-  while (i < w.length - 1 && (k -= w[i]) > 0) i++;
-  const t = hidden[i], ing = A.ING[t.id], fam = FAMILIES[ing.family].label.toLowerCase();
-  S.target = t.id;
-  const lv = (S.level[t.id] = Math.max(2, (S.level[t.id] || 0) + 1));
-  const text = lv === 2 ? `One of the hidden ${t.t} notes is ${an(fam)} note, and its best-known source is ${ing.country}.` : scentClue(t, lv);
-  S.hints.push({ id: t.id, lv, text, spot: 1 });
-  if (!quiet) { const t0 = performance.now() + 1400; for (const k of [0, 1, 2]) fxItems.push({ type: 'ripple', loc: ing.loc, t0: t0 + k * 500, color: famHex(ing.family) }); }
-}
-function scentClue(t, lv) {
-  const ing = A.ING[t.id], fam = FAMILIES[ing.family].label.toLowerCase();
-  return lv === 1 ? `One of the hidden ${t.t} notes is ${an(fam)} note.`
-    : lv === 2 ? `That ${fam} note grows in ${region(ing.loc, ing.country)}. The globe has turned to show you where.`
-    : lv === 3 ? redact(`Part used: ${ing.part}. How it is made: ${ing.method}.`, ing, true)
-    : `It is listed as ${pattern(t.n)}, ${t.n.replace(/[^\p{L}]/gu, '').length} letters starting with ${t.n.charAt(0).toUpperCase()}.`;
-}
-function scentHint(quiet) {
-  const hidden = S.notes.filter((x) => x.id && !S.found.has(x.id));
-  if (!hidden.length) return;
-  // a miss sharpens the clued note's clue; once that one is spelled out, the next miss hints at the most widely used other note
-  let t = hidden.find((x) => x.id === S.target && (S.level[x.id] || 0) < 4);
-  if (!t) t = hidden.filter((x) => x.id !== S.target).sort((a, b) => (S.level[a.id] || 0) - (S.level[b.id] || 0) || A.USES[b.id].length - A.USES[a.id].length)[0];
-  if (!t || (S.level[t.id] || 0) >= 4) return;
-  const lv = (S.level[t.id] = (S.level[t.id] || 0) + 1), ing = A.ING[t.id];
-  S.hints.push({ id: t.id, lv, text: scentClue(t, lv) });
-  if (!quiet && lv === 2) { A.flyTo(ing.loc, 1.05); const t0 = performance.now() + 900; for (const k of [0, 1, 2]) fxItems.push({ type: 'ripple', loc: ing.loc, t0: t0 + k * 500, color: famHex(ing.family) }); }
-}
-const pattern = (n) => n.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + '·'.repeat(Math.max(0, [...w].length - 1))).join(' ');
-
-function scentGuess(raw, id) {
-  if (S?.kind !== 'scent' || S.phase !== 'scent') return;
-  const res = scentResolve(raw, id), say = gameEl.querySelector('[data-sc-say]'), input = gameEl.querySelector('[data-sc-in]');
-  scentSug(null);
-  if (!res) return;
-  const nm = (k) => A.esc(lc(A.ING[k].name));
-  if (res.unknown != null) { say.innerHTML = `“${A.esc(raw.trim())}” isn’t a note in the atlas. Pick one from the list as you type.`; say.className = 'g-sc-say'; return; }
-  if (res.already) { say.innerHTML = `You already found <b>${A.esc(res.already.n)}</b>.`; say.className = 'g-sc-say'; input.value = ''; return; }
-  if (res.repeat) { say.innerHTML = `You already tried <b>${nm(res.repeat)}</b>. That one’s not in it.`; say.className = 'g-sc-say'; input.value = ''; return; }
-  input.value = '';
-  if (res.hit) {
-    const x = res.hit, r = A.facts.draw(x.id), isNew = A.facts.discover(x.id, r), drops = A.facts.earn?.(x.id, r) || 0; A.notes?.collect(x.id);
-    const spot = S.spots; scentApply({ id: x.id, hit: 1, r, isNew: isNew ? 1 : 0 }); res.clue = S.spots !== spot && S.phase === 'scent';
-    const ing = A.ING[x.id], col = A.ingHex(ing), t = performance.now() + 700;
-    A.flyTo(ing.loc, 1.5);
-    fxItems.push({ type: 'burst', loc: ing.loc, t0: t, color: col, parts: sparks(26) }, { type: 'float', loc: ing.loc, t0: t, text: ing.name, color: col });
-    scentPins(x.id); scentLinks(x.id);
-    const rr = rareOf(x.id);
-    say.innerHTML = `<span class="g-pts r-${rr.label.toLowerCase()}">+${rr.pts}</span><b>${A.esc(x.n.charAt(0).toUpperCase() + x.n.slice(1))}</b> is in it, ${an(x.t)} note from ${A.esc(ing.country)}. ${rr.label === 'Rare' || rr.label === 'Uncommon' ? `A ${rr.label.toLowerCase()} find: only ${rr.pct}% of perfumes list it.` : `${rr.label} note, in ${rr.pct}% of perfumes.`} You found ${an(RARITY[r].label.toLowerCase())} fact${isNew ? '' : ' you already had'}${drops ? ` and <b class="g-drops-won">${drops} drops</b> of ${A.esc(x.n)} essence` : ''}.${res.clue ? ' That was the clued note, so a new clue is below.' : ''}`;
-    say.className = 'g-sc-say hit';
-  } else {
-    scentApply({ id: res.miss, hit: 0 });
-    say.innerHTML = S.lives ? `No <b>${nm(res.miss)}</b> in this one. ${S.lives} chance${S.lives === 1 ? '' : 's'} left, and a sharper hint below.` : `No <b>${nm(res.miss)}</b> in this one, and that was your last chance.`;
-    say.className = 'g-sc-say miss';
-    const box = gameEl.querySelector('.g-sc-field'); box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
-  }
-  if (S.daily) store.set(`scent:${S.date}`, { id: S.f.id, log: S.log, over: S.phase === 'done' }); A.saved?.();
-  if (S.phase === 'done') { S.fresh = res.hit?.id; return scentFinish(); }
-  if (res.hit) A.milestones?.({ avoid: S.notes.filter((n) => n.id && !S.found.has(n.id)).map((n) => n.id) });
-  S.fresh = res.hit?.id; S.justLost = !res.hit; S.freshHint = res.hit && !res.clue ? null : S.hints[S.hints.length - 1]?.id; S.newHint = !res.hit || res.clue;
-  scentUpdate();
-  S.fresh = S.justLost = S.freshHint = S.newHint = null;
-  if (res.hit) { scentFact(gameEl.querySelector('[data-sc-fact]'), S.last); scentCheer(res.hit.id); if (res.clue) setTimeout(scentNewClue, 900); } else scentSigh();
-  if (!matchMedia('(hover: none)').matches) input.focus();
-}
-// a found note: a drop of it arcs from the box into its slot, which flips over in a burst of its colour,
-// and a puff of the same colour rises off the bottle
-function scentCheer(id) {
-  const col = A.ingHex(A.ING[id]), chip = gameEl.querySelector(`[data-sc-notes] [data-id="${id}"]`);
-  flyDrop(gameEl.querySelector('.g-sc-field input'), chip, col).then(() => { burst(chip, col, { n: 18, spread: 60 }); ring(chip, col, { size: 130 }); });
-  mist(gameEl.querySelector('#g-hero'), col, { n: 10, rise: 150, size: 40 });
-  replay(gameEl.querySelector('[data-sc-count]'), 'mv-bump');
-  replay(gameEl.querySelector('[data-sc-say]'), 'mv-in');
-}
-// a miss: the lost drop evaporates, the new hint types itself out and its note glows in its family colour
-function scentSigh() {
-  for (const el of document.querySelectorAll('.g-drops svg.lost')) mist(el, 'rgba(150, 138, 126, .7)', { n: 5, rise: 46, size: 12, at: 0.2 });
-  scentNewClue();
-  cascade([...gameEl.querySelectorAll('[data-sc-tried] .badge')].slice(-1), { cls: 'mv-pop' });
-  replay(gameEl.querySelector('.g-sc-field input'), 'flash');
-  replay(gameEl.querySelector('[data-sc-say]'), 'mv-in');
-}
-// a new or sharper clue types itself out and its note glows in its family colour
-function scentNewClue() {
-  const hint = gameEl.querySelector('.g-sc-hint.new span'); typeOut(hint, { ms: Math.min(1100, hint ? hint.textContent.length * 14 : 0), delay: 250 });
-  const chip = gameEl.querySelector('[data-sc-notes] .fresh'); if (chip) setTimeout(() => ring(chip, getComputedStyle(chip).getPropertyValue('--c') || '#888', { size: 70, ms: 1100 }), 350);
-}
-function scentGiveUp() {
-  if (S?.kind !== 'scent' || S.phase !== 'scent') return;
-  S.phase = 'done'; S.gaveUp = true;
-  if (S.daily) store.set(`scent:${S.date}`, { id: S.f.id, log: S.log, over: true }); A.saved?.();
-  scentFinish();
-}
-function scentFinish(quiet) {
-  S.phase = 'done';
-  const total = S.notes.filter((x) => x.id).length, got = S.found.size;
-  S.celebrate = !quiet;
-  if (S.daily && !quiet) { const s = store.get('scent:streak'); store.set('scent:streak', { last: S.date, n: s?.last === S.date ? s.n : s?.last === prevDay(S.date) ? s.n + 1 : 1 }); A.saved?.(); }
-  scentRender();
-  if (S.daily && Stats.enabled()) scentWorld();
-  if (!quiet) A.milestones?.({ perfect: got === total });
-  // every note's origin, with a line from each one you found back to the perfume house
-  const home = HOUSES[S.f.house], ings = S.notes.filter((x) => x.id).map((x) => A.ING[x.id]);
-  setPins([...(home ? [{ loc: home, kind: 'guess', text: S.f.house, col: A.fragHex(S.f) }] : []),
-    ...ings.map((ing) => { const k = ings.filter((x) => S.found.has(x.id) === S.found.has(ing.id)).indexOf(ing), got = S.found.has(ing.id);
-      return { loc: ing.loc, kind: 'answer', ing, small: true, missed: !got, pop: !quiet, delay: got ? 400 + k * 220 : 700 + S.found.size * 220 + k * 90 }; })]);
-  fxItems = []; const t0 = performance.now() + (quiet ? 0 : 500);
-  if (home) {
-    const got = ings.filter((ing) => S.found.has(ing.id));
-    got.forEach((ing, k) => fxItems.push({ type: 'arc', from: ing.loc, to: home, t0: quiet ? t0 - 2000 : t0 + k * 220, dur: 1000, color: A.ingHex(ing), keep: true, flow: true, phase: k / Math.max(1, got.length) }));
-  }
-  if (!quiet && got === total) fxItems.push({ type: 'confetti', t0: t0 + 400, parts: confetti(), colors: [A.fragHex(S.f), accent, '#cfae6e', '#d9a3b5', '#8fae8b'] });
-  A.flyTo(A.midpoint(ings.map((i) => i.loc).concat(home ? [home] : [])), 0.95);
-  if (!quiet) showSplash(`<span class="mono">${got === total ? 'Every note found' : 'Notes found'}</span><b>${got} / ${total}</b>`);
-  A.play.ver++; A.refresh();
-  // on a small screen the score sits below the bottle, so bring it into view
-  if (!quiet) setTimeout(() => { const el = document.querySelector('.g-sc-end'); if (el && el.getBoundingClientRect().top > innerHeight * 0.7) el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }, 900);
-}
-
-function scentChip(x) {
-  if (x.given) return `<span class="badge note lab" title="Made from aroma molecules, with no single place of origin, so it is given">${A.esc(x.n)}</span>`;
-  const ing = A.ING[x.id];
-  const pct = S.phase === 'done' && S.world?.n ? Math.round(100 * (S.world.notes[x.id] || 0) / S.world.n) : null;
-  const share = pct == null ? '' : `<em class="g-pct" title="Found by ${pct}% of today’s players">${pct}%</em>`;
-  if (S.found.has(x.id)) { const rr = rareOf(x.id); return `<span class="badge note tinted g-sc-n${S.fresh === x.id ? ' pop' : ''}" data-id="${x.id}" style="--c:${A.ingHex(ing)}" title="${rr.label}: in ${rr.pct}% of perfumes"><span class="dot" style="background:${A.ingHex(ing)}"></span>${A.esc(x.n)}<em class="g-chip-pts">${rr.pts}</em>${share}</span>`; }
-  if (S.phase === 'done') return `<span class="badge note g-sc-n missed" data-id="${x.id}" title="Not found"><span class="dot" style="background:${A.ingHex(ing)}"></span>${A.esc(x.n)}${share}</span>`;
-  const lv = S.level[x.id] || 0, col = lv ? famHex(ing.family) : '';
-  return `<span class="badge note g-sc-n hidden${lv ? ' hinted' : ''}${S.target === x.id ? ' clued' : ''}${S.freshHint === x.id ? ' fresh' : ''}" data-id="${x.id}" ${lv ? `style="--c:${col}" title="${S.target === x.id ? 'The clued note' : 'Hinted'}: ${FAMILIES[ing.family].label.toLowerCase()}"` : 'title="Hidden note"'}>${lv ? `<span class="dot" style="background:${col}"></span>` : ''}<span class="mono">${lv >= 4 ? A.esc(pattern(x.n)) : '?'}</span></span>`;
-}
-function scentPyramid() {
-  return ['top', 'heart', 'base'].map((t) => { const xs = S.notes.filter((x) => x.t === t); return xs.length ? `<div class="tier"><span class="k">${TIER_NAME[t]}</span><div class="notes">${xs.map(scentChip).join('')}</div></div>` : ''; }).join('');
-}
-const drop = (on, k, lost) => `<svg viewBox="0 0 24 24" class="${on ? 'on' : lost ? 'lost' : ''}" style="--i:${k}"><path d="M12 2.6c3.4 4.4 6.4 8.1 6.4 11.6a6.4 6.4 0 0 1-12.8 0c0-3.5 3-7.2 6.4-11.6z"/></svg>`;
-const scentDrops = () => Array.from({ length: SCENT_LIVES }, (_, k) => drop(k < S.lives, k, S.justLost && k === S.lives)).join('');
-const HINT_IC = ['<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>', '<path d="M12 21s6-5.4 6-10.3A6 6 0 0 0 6 10.7C6 15.6 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2"/>', '<path d="M5 19c8 0 14-6 14-14-8 0-14 6-14 14zM5 19l7-7"/>', '<path d="M4 7h16M4 12h10M4 17h7"/>'];
-function scentHints() {
-  // while playing, clues about notes already found step aside
-  const hs = S.phase === 'scent' ? S.hints.filter((h) => !S.found.has(h.id)) : S.hints;
-  return hs.length ? hs.slice().reverse().map((h, k) => `<div class="g-sc-hint${h.spot ? ' clued' : ''}${k === 0 && S.phase === 'scent' && (S.newHint ?? true) ? ' new' : ''}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${HINT_IC[h.lv - 1]}</svg><span>${A.esc(h.text)}</span></div>`).join('')
-    : '<p class="g-note muted">One hidden note always has a clue. Find it and the clue moves to another note.</p>';
-}
-const hintCount = () => { const n = new Set(S.hints.filter((h) => S.phase !== 'scent' || !S.found.has(h.id)).map((h) => h.id)).size; return S.phase === 'scent' ? `${n} note${n === 1 ? '' : 's'} clued` : `${S.hints.length} in all`; };
-function scentHud() {
-  const total = S.notes.filter((x) => x.id).length;
-  hud.innerHTML = `<span class="g-hq"><b>${A.esc(S.f.name)}</b> · ${S.found.size} / ${total} notes</span><span class="g-drops" role="img" aria-label="${S.lives} chances left">${scentDrops()}</span>`;
-  // the panel already carries the name, count and drops; on a phone, where the panel sits under the globe, the summary stays
-  hud.classList.toggle('show', matchMedia('(max-width: 860px)').matches); fab.classList.remove('show'); fab.hidden = true;
-}
-function scentUpdate() {
-  const total = S.notes.filter((x) => x.id).length;
-  gameEl.querySelector('[data-sc-notes]').innerHTML = scentPyramid();
-  gameEl.querySelector('[data-sc-count]').textContent = `${S.found.size} of ${total} found`;
-  gameEl.querySelector('[data-sc-lives]').innerHTML = scentDrops();
-  gameEl.querySelector('[data-sc-lives]').setAttribute('aria-label', `${S.lives} chances left`);
-  gameEl.querySelector('[data-sc-hints]').innerHTML = scentHints();
-  gameEl.querySelector('[data-sc-hcount]').textContent = hintCount();
-  gameEl.querySelector('[data-sc-tried]').innerHTML = scentTried();
-  scentHud(); scentHero();
-}
-const scentTried = () => (S.tried.length ? `<span class="mono muted">Not in it</span>${S.tried.map((id) => `<span class="badge note g-sc-n no">${A.esc(A.ING[id].name)}</span>`).join('')}` : '');
-function scentFact(slot, c) { if (slot && c) A.facts.mount(slot, c.id, c.r, { isNew: c.isNew }); }
-// on the published site the daily bottle is a pre-rendered picture, so the page opens without loading the 3D engine;
-// touching it swaps in the live, turnable bottle
-const HEROES = document.querySelector('meta[name="fraguessr-thumbs"]')?.content;
-function scentHero() {
-  const hero = gameEl.querySelector('#g-hero'), host = hero?.querySelector('.model'); if (!host) return;
-  if (HEROES && !hero.dataset.live) {
-    if (host.querySelector('img.g-sc-shot')) return;
-    const img = new Image(); img.className = 'g-sc-shot'; img.alt = ''; img.decoding = 'async';
-    img.onload = () => hero.classList.add('loaded', 'still');
-    img.onerror = () => { hero.dataset.live = '1'; img.remove(); scentHero(); };
-    img.src = `${HEROES}h-${S.f.id}.webp`; host.append(img);
-    hero.addEventListener('pointerdown', () => { if (hero.dataset.live) return; hero.dataset.live = '1'; scentHero(); }, { once: true });
-    return;
-  }
-  // the picture stays until the live bottle can draw
-  const shot = host.querySelector('img.g-sc-shot');
-  const f = S.f, found = S.log.filter((e) => e.hit).map((e) => A.ING[e.id]).slice(-3).reverse();
-  A.getStage().then((st) => {
-    if (!st || !host.isConnected) { hero.classList.add('no-3d'); return; }
-    st.mount(host);
-    const sig = A.fragHex(f), dark = A.isDark();
-    st.showFragrance(f, A.liquidFor(f), found, dark ? A.mix(sig, '#332c27', 0.8) : A.mix(sig, '#ffffff', 0.88), sig,
-      dark ? [A.mix(sig, '#141110', 0.82), A.mix(sig, '#1d1916', 0.72)] : [A.mix(sig, '#fffdfa', 0.84), A.mix(sig, '#f3ede4', 0.7)]);
-    st.ready().then(() => { shot?.remove(); hero.classList.remove('still'); requestAnimationFrame(() => hero.classList.add('loaded')); });
-  });
-}
-// the opening: the name writes itself in, the categories pop, the profile bar fills family by family
-// and the hidden notes are dealt out tier by tier; the end: the score counts up and the missed notes turn over
-function scentChoreo() {
-  const q = (sel) => gameEl.querySelectorAll(sel), intro = S.intro, end = S.celebrate;
-  S.intro = S.celebrate = false; S.fresh = null;
-  if (intro) {
-    letters(gameEl.querySelector('.g-scent .body .title'), { delay: 120, step: 34 });
-    cascade(q('.g-scent .detail-top .g-drops svg'), { cls: 'mv-drip', step: 90, delay: 250 });
-    cascade(q('.g-scent .body > .badges .badge'), { cls: 'mv-pop', step: 60, delay: 380 });
-    cascade(q('.g-sc-prof i'), { cls: 'mv-grow', step: 110, delay: 560 });
-    cascade(q('.g-scent .body > .prose, .g-scent .body > .section-h'), { step: 90, delay: 640 });
-    cascade(q('[data-sc-notes] .badge'), { cls: 'mv-deal', step: 45, delay: 820, max: 30 });
-    cascade(q('.g-sc-guess, .g-sc-hints, .g-sc-tried, .g-sc-quit'), { step: 90, delay: 1150 });
-  }
-  if (end) {
-    countTo(gameEl.querySelector('.g-big [data-n]'), { ms: 900, delay: 250 });
-    letters(gameEl.querySelector('.g-sc-end .title'), { delay: 300, step: 30 });
-    cascade(q('.g-sc-end .prose, .g-sc-end .g-meter, .g-sc-end .g-note'), { step: 120, delay: 500 });
-    cascade(q('[data-sc-notes] .missed'), { cls: 'mv-deal', step: 70, delay: 700, max: 20 });
-    cascade(q('.g-sc-cards .badge'), { cls: 'mv-pop', step: 60, delay: 900 });
-    const all = S.found.size === S.notes.filter((x) => x.id).length, col = A.fragHex(S.f);
-    if (all) setTimeout(() => { for (const el of q('[data-sc-notes] .badge')) { const ing = A.ING[el.dataset.id]; burst(el, ing ? A.ingHex(ing) : col, { n: 8, spread: 36, stars: 3 }); } }, 700);
-    setTimeout(() => mist(gameEl.querySelector('#g-hero'), col, { n: all ? 16 : 8, rise: 170, size: 46 }), 200);
-  }
-}
-function scentShare() {
-  const total = S.notes.filter((x) => x.id).length;
-  const pts = scentPoints([...S.found], S.lives, total).total;
-  const b = S.daily && bonusSaved(S.date), geo = b?.done ? `\n📍 ${b.rounds.map((x) => square(x.points)).join('')} ${bonusTotal(b).toLocaleString('en')}` : '';
-  return `Fraguessr ${S.daily ? dailyName(S.date) : 'practice scent'}\n${S.f.name}: ${S.found.size}/${total} notes · ${pts.toLocaleString('en')} pts\n${S.log.map((e) => (e.hit ? rareOf(e.id).sq : '🟥')).join('')}${'💧'.repeat(S.lives)}${geo}\n${SITE}`;
-}
-// ── everyone today: shared counts from other players, once Firebase is set up (stats.js) ──
-async function scentWorld() {
-  const s0 = S, date = S.date;
-  if (store.get('scent:sent') !== date && await Stats.submit(date, [...S.found])) store.set('scent:sent', date);
-  const w = await Stats.load(date);
-  if (S !== s0) return;
-  S.world = w && w.n ? w : null;
-  const el = gameEl.querySelector('[data-sc-world]'); if (!el) return;
-  el.outerHTML = worldHtml();
-  gameEl.querySelector('[data-sc-notes]').innerHTML = scentPyramid();
-  if (S.world) { cascade(gameEl.querySelectorAll('.g-hist i'), { cls: 'mv-pop', step: 40, delay: 100 }); cascade(gameEl.querySelectorAll('.g-pct'), { cls: 'mv-pop', step: 50, delay: 300 }); }
-}
-function worldHtml() {
-  const w = S.world;
-  if (w === undefined) return '<div class="g-sc-world wait" data-sc-world><span class="mono">Everyone today</span><p>Counting today’s players…</p></div>';
-  if (!w) return '';
-  const ids = S.notes.filter((x) => x.id).map((x) => x.id), total = ids.length, mine = S.found.size, n = w.n;
-  const at = (k) => w.score[k] || 0, below = ids.reduce((a, _, k) => a + (k < mine ? at(k) : 0), 0), top = Math.max(1, ...Array.from({ length: total + 1 }, (_, k) => at(k)));
-  const share = (id) => (w.notes[id] || 0) / n, name = (id) => A.esc(S.notes.find((x) => x.id === id).n);
-  const rarest = [...S.found].sort((a, b) => share(a) - share(b))[0], hardest = ids.slice().sort((a, b) => share(a) - share(b))[0];
-  const lines = [n === 1 ? 'You are the first to finish today’s scent.' : `<b>${n.toLocaleString()}</b> players have finished today’s scent. You found more notes than <b>${Math.round(100 * below / n)}%</b> of them.`];
-  if (n > 1 && rarest) lines.push(`Your rarest find was <b>${name(rarest)}</b>, found by ${Math.round(100 * share(rarest))}% of players.`);
-  if (n > 1 && hardest && hardest !== rarest) lines.push(`The hardest note today is <b>${name(hardest)}</b>, found by ${Math.round(100 * share(hardest))}%.`);
-  return `<div class="g-sc-world" data-sc-world><span class="mono">Everyone today</span>
-    <div class="g-hist" role="img" aria-label="How many notes players found">${Array.from({ length: total + 1 }, (_, k) => `<i class="${k === mine ? 'me' : ''}" style="--h:${at(k) / top}" title="${at(k)} player${at(k) === 1 ? '' : 's'} found ${k}"><b></b><span>${k}</span></i>`).join('')}</div>
-    ${lines.map((l) => `<p>${l}</p>`).join('')}</div>`;
-}
-function scentRender() {
-  const f = S.f, prof = scentProfile(f, S.notes), total = S.notes.filter((x) => x.id).length, done = S.phase === 'done';
-  const got = S.found.size, [, verdict, line] = VERDICT.find(([p]) => got / total >= p - 1e-9), streak = store.get('scent:streak');
-  const until = Math.max(1, Math.ceil((Date.parse(S.date) + 864e5 - Date.now()) / 6e4)), cards = S.log.filter((e) => e.hit);
-  gameEl.innerHTML = `
+    </div>`,Pe(h.querySelector(".g-big")),V(),q(h.querySelector(".game")),q(h.querySelector(".g-table")),q(h.querySelector(".body"))}function cs(e){return`Fraguessr · ${z[t.mode].label}${t.timed?` · ${t.time}s`:""}
+${t.results.map(s=>be(s.points)).join("")} ${t.total.toLocaleString()}/${(t.rounds.length*A).toLocaleString()}
+${e}`}function ha(){const e=t?.mode||"notes",s=t?.timed,a=Math.random()*2**32>>>0;t=ge({mode:e,timed:s,seed:a,rounds:Ne(e,a,o.USES),i:-1,results:[],total:0}),re()}const Be=5,ds=5,us=19,ma=["chanel-no-5","chanel-coco-mademoiselle","chanel-bleu-de-chanel-edp","chanel-chance","chanel-allure-homme-sport","chanel-egoiste","chanel-no-19","chanel-coco-noir","chanel-coco","chanel-allure","dior-sauvage-edt","dior-sauvage-elixir","dior-miss-dior-blooming-bouquet","dior-poison","dior-hypnotic-poison","dior-eau-sauvage","dior-diorissimo","dior-dune","dior-dolce-vita","yves-saint-laurent-black-opium","yves-saint-laurent-libre","yves-saint-laurent-y-eau-de-parfum","yves-saint-laurent-mon-paris","yves-saint-laurent-paris","guerlain-shalimar","guerlain-mitsouko","guerlain-la-petite-robe-noire","guerlain-samsara","guerlain-jicky","guerlain-l-homme-ideal","guerlain-apres-l-ondee","hermes-terre-d-hermes","hermes-un-jardin-sur-le-nil","hermes-eau-d-orange-verte","tom-ford-oud-wood","tom-ford-lost-cherry","tom-ford-neroli-portofino","tom-ford-tuscan-leather","tom-ford-noir-extreme","tom-ford-grey-vetiver","tom-ford-ombre-leather","creed-aventus","creed-green-irish-tweed","creed-silver-mountain-water","maison-francis-kurkdjian-baccarat-rouge-540","maison-francis-kurkdjian-oud-satin-mood","le-labo-santal-33","le-labo-another-13","le-labo-rose-31","le-labo-the-noir-29","byredo-gypsy-water","byredo-bal-d-afrique","byredo-mojave-ghost","jo-malone-london-wood-sage-sea-salt","jo-malone-london-english-pear-freesia","jo-malone-london-lime-basil-mandarin","giorgio-armani-acqua-di-gio-profumo","giorgio-armani-si","giorgio-armani-armani-code","giorgio-armani-stronger-with-you","rabanne-1-million","rabanne-invictus","rabanne-lady-million","jean-paul-gaultier-le-male","jean-paul-gaultier-classique","jean-paul-gaultier-scandal","jean-paul-gaultier-ultra-male","viktor-rolf-flowerbomb","viktor-rolf-spicebomb","mugler-a-men","lancome-la-vie-est-belle","lancome-tresor","lancome-idole","prada-infusion-d-iris","prada-paradoxe","gucci-rush","gucci-guilty","gucci-flora-by-gucci","gucci-bamboo","calvin-klein-ck-one","calvin-klein-eternity","calvin-klein-euphoria","davidoff-cool-water","davidoff-cool-water-woman","hugo-boss-boss-bottled","versace-eros","versace-bright-crystal","versace-dylan-blue","dolce-gabbana-light-blue","dolce-gabbana-the-one-for-men","narciso-rodriguez-for-her","marc-jacobs-daisy","kenzo-flower-by-kenzo","issey-miyake-l-eau-d-issey","estee-lauder-beautiful","estee-lauder-white-linen","estee-lauder-pleasures","clinique-happy","diptyque-do-son","diptyque-tam-dao","serge-lutens-ambre-sultan","serge-lutens-chergui","frederic-malle-portrait-of-a-lady","frederic-malle-carnal-flower","maison-margiela-replica-jazz-club","maison-margiela-replica-by-the-fireplace","parfums-de-marly-layton","parfums-de-marly-delina","kilian-paris-love-don-t-be-shy","amouage-interlude-man","acqua-di-parma-colonia","ralph-lauren-polo","givenchy-l-interdit","givenchy-gentleman-eau-de-parfum","givenchy-pi","chloe-chloe-eau-de-parfum","burberry-her","montblanc-explorer","montblanc-legend","nina-ricci-l-air-du-temps","ariana-grande-cloud","kayali-vanilla-28","valentino-born-in-roma-donna","azzaro-wanted","azzaro-pour-homme","dkny-be-delicious","lanvin-arpege","jean-patou-joy","robert-piguet-fracas","cacharel-anais-anais","lolita-lempicka-lolita-lempicka","guy-laroche-drakkar-noir","lattafa-khamrah","armaf-club-de-nuit-intense-man","carolina-herrera-bad-boy","elizabeth-arden-green-tea","britney-spears-fantasy","nautica-nautica-voyage"],it=[[60,"Classic",100,"🟩"],[25,"Common",150,"🟩"],[8,"Uncommon",250,"🟦"],[0,"Rare",400,"🟪"]],ps=50;let fa=null;const ga=e=>(fa||=j.reduce((s,a)=>{for(const r of new Set(a.ingredients))s[r]=(s[r]||0)+1;return s},{}))[e]||0,Re=e=>{const s=ga(e),[,a,r,i]=it.find(([n])=>s>=n);return{label:a,pts:r,sq:i,pct:Math.max(1,Math.round(100*s/j.length))}};function lt(e,s,a){const r=e.reduce((i,n)=>i+Re(n).pts,0);return{notes:r,bonus:e.length===a?s*ps:0,total:r+(e.length===a?s*ps:0)}}const ba={top:"Top",heart:"Heart",base:"Base"},ya={top:{citrus:"a bright, zesty burst",floral:"a soft floral lift",green:"a crisp green snap",fruit:"a juicy, fruity splash",spice:"a warm, peppery spark",wood:"a dry woody hush",resin:"a glowing balsamic warmth",gourmand:"a sweet, edible hello",animalic:"a skin-warm musky hum",marine:"a breezy, salty splash"},heart:{citrus:"a sparkling citrus heart",floral:"a heart of blooming flowers",green:"a leafy, herbal heart",fruit:"a ripe, fruity heart",spice:"a heart of warm spices",wood:"a heart of polished woods",resin:"a smoky, resinous heart",gourmand:"a creamy, sweet heart",animalic:"a sensual animalic heart",marine:"a cool, watery heart"},base:{citrus:"a clean, bright drydown",floral:"a powdery floral drydown",green:"a mossy, earthy drydown",fruit:"a jammy drydown",spice:"a spiced drydown",wood:"a smooth woody drydown",resin:"a warm amber drydown",gourmand:"a sweet, cosy drydown",animalic:"a soft musky drydown",marine:"a mineral, salty drydown"}},va=[[1,"Perfect nose","Every note named. You could have written the formula."],[.75,"Nose","Only a note or two got past you."],[.5,"Perfumery student","You caught the heart of it."],[.25,"Fragrance lover","A good sniff. The rest is now in your collection."],[0,"Curious traveller","A tricky one. Every note you found today is yours to keep."]],$a=e=>/^\p{Lu}\p{Ll}/u.test(e)?e.charAt(0).toLowerCase()+e.slice(1):e,ye=e=>(/^[aeiou]/i.test(e)?"an ":"a ")+e,wa=e=>e.length<2?e.join(""):`${e.slice(0,-1).join(", ")} and ${e[e.length-1]}`,ve=e=>"#"+R[e].color.map(s=>Math.round(s*255).toString(16).padStart(2,"0")).join(""),H=e=>e.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g," ").trim(),$e=e=>new Date(Date.parse(e)-864e5).toISOString().slice(0,10),ka=new Intl.DateTimeFormat("en-GB",{day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}),ct=e=>ka.format(new Date(e));function dt(e){const s=[],a=new Set;for(const r of["top","heart","base"])for(const i of e.tiers[r]){const n=_t(i);!n||!ze[n]?s.push({t:r,n:i,given:!0}):a.has(n)||(a.add(n),s.push({t:r,n:i,id:n}))}return s}const te=e=>dt(e).filter(s=>s.id).length;let ut=null;const ze=Object.fromEntries(W.map(e=>[e.id,e])),qn=()=>le(D()),Nn=()=>pt().map(e=>e.id);function Sa(){const e=D(),s=le(e),a=$.get(`scent:${e}`),r=$.get("scent:streak"),i=a?.id===s.id&&!!a.over,n=a?.id===s.id&&!!a.log.length,l=n?a.log.filter(m=>m.hit).length:0;return{id:s.id,name:s.name,house:s.house,label:we(e),total:te(s),notes:[...s.ingredients],got:l,done:i,started:n,streak:r&&(r.last===e||r.last===$e(e))?r.n:0}}const Ma=["chanel-bleu-de-chanel-parfum","chanel-sycomore","chanel-coromandel","chanel-bois-des-iles","chanel-allure-homme-edition-blanche","dior-addict","dior-oud-ispahan","dior-dior-homme-parfum","dior-miss-dior-eau-de-parfum","dior-dior-homme-sport","yves-saint-laurent-l-homme","yves-saint-laurent-rive-gauche","yves-saint-laurent-tuxedo","yves-saint-laurent-libre-intense","guerlain-spiritueuse-double-vanille","guerlain-angelique-noire","guerlain-insolence","tom-ford-fucking-fabulous","tom-ford-cafe-rose","tom-ford-costa-azzurra","tom-ford-tobacco-oud","tom-ford-beau-de-jour","creed-viking","creed-aventus-for-her","creed-himalaya","maison-francis-kurkdjian-a-la-rose","maison-francis-kurkdjian-724","maison-francis-kurkdjian-gentle-fluidity-gold","hermes-kelly-caleche","hermes-bel-ami","giorgio-armani-stronger-with-you-intensely","giorgio-armani-armani-code-profumo","rabanne-pour-homme","rabanne-black-xs","rabanne-invictus-victory","versace-eros-flame","versace-man-eau-fraiche","versace-yellow-diamond","dolce-gabbana-dolce","dolce-gabbana-k-by-dolce-gabbana","dolce-gabbana-light-blue-eau-intense","givenchy-ange-ou-demon","givenchy-amarige","givenchy-irresistible","burberry-brit-for-her","burberry-mr-burberry","lancome-hypnose","lancome-magie-noire","gucci-memoire-d-une-odeur","gucci-envy","prada-prada-amber","prada-luna-rossa-black","calvin-klein-eternity-for-men","calvin-klein-ck-be","bvlgari-eau-parfumee-au-the-vert","bvlgari-omnia-amethyste","narciso-rodriguez-narciso","narciso-rodriguez-for-him-bleu-noir","azzaro-chrome","viktor-rolf-bonbon","ralph-lauren-polo-blue","ralph-lauren-polo-red","le-labo-lys-41","le-labo-patchouli-24","le-labo-vetiver-46","le-labo-ylang-49","jo-malone-london-pomegranate-noir","jo-malone-london-nectarine-blossom-honey","jo-malone-london-orange-blossom","diptyque-l-ombre-dans-l-eau","diptyque-eau-duelle","parfums-de-marly-percival","maison-margiela-replica-bubble-bath","maison-margiela-replica-when-the-rain-stops","montale-black-aoud","mancera-red-tobacco","louis-vuitton-ombre-nomade","bdk-parfums-rouge-smoking","etat-libre-d-orange-fat-electrician","etat-libre-d-orange-you-or-someone-like-you","tiziana-terenzi-kirke","roja-parfums-elysium-pour-homme","maison-crivelli-hibiscus-mahajad","vilhelm-parfumerie-mango-skin","histoires-de-parfums-1740-marquis-de-sade","nasomatto-black-afgano","orto-parisi-megamare","maison-louis-marie-no-04-bois-de-balincourt","clive-christian-x-for-men","penhaligon-s-the-tragedy-of-lord-george","xerjoff-accento","lacoste-l-12-12-blanc","lacoste-lacoste-pour-femme","miu-miu-miu-miu","coach-coach-eau-de-parfum","coach-coach-for-men","michael-kors-michael-kors","tiffany-co-tiffany-co-eau-de-parfum","abercrombie-fitch-fierce","bath-body-works-japanese-cherry-blossom","billie-eilish-eilish","stella-mccartney-stella","phlur-missing-person","salvatore-ferragamo-uomo","paris-hilton-paris-hilton","jennifer-lopez-glow","beyonce-heat","taylor-swift-wonderstruck","elizabeth-taylor-white-diamonds","clinique-aromatics-elixir","avon-far-away","cartier-pasha-de-cartier","cartier-must-de-cartier","van-cleef-arpels-first","ariana-grande-r-e-m","sabrina-carpenter-sweet-tooth","hollister-wave","mercedes-benz-mercedes-benz-man","ferrari-scuderia-ferrari-black","jimmy-choo-jimmy-choo-man"];let xa;const Ca=()=>xa||=[...pt(),...Ma.map(e=>j.find(s=>s.id===e)).filter(e=>e&&te(e)>=ds&&te(e)<=us)];function pt(){if(ut)return ut;const e=ma.map(a=>j.find(r=>r.id===a)).filter(a=>a&&te(a)>=ds&&te(a)<=us),s=Te(tt("fraguessr:scent"));for(let a=e.length-1;a>0;a--){const r=Math.floor(s()*(a+1));[e[a],e[r]]=[e[r],e[a]]}return ut=e}function le(e){const s=pt(),a=Math.floor(Date.parse(e)/864e5);return s[(a%s.length+s.length)%s.length]}function La(e,s){const a={top:1,heart:1.5,base:2},r={},i={};for(const d of["top","heart","base"]){const c={};for(const p of s)if(p.id&&p.t===d){const f=o.ING[p.id].family;c[f]=(c[f]||0)+1,r[f]=(r[f]||0)+a[d]}i[d]=Object.entries(c).sort((p,f)=>f[1]-p[1])[0]?.[0]}const n=Object.entries(r).sort((d,c)=>c[1]-d[1]),l=n.reduce((d,[,c])=>d+c,0),m=[["opens with","top"],["moves into","heart"],["settles into","base"]].filter(([,d])=>i[d]).map(([d,c])=>`${d} ${ya[c][i[c]]}`),u={Women:"for women",Men:"for men",Unisex:"for everyone"}[e.audience]||"",{genre:g}=o.describe(e);return{genre:g,fams:n.map(([d,c])=>({fm:d,p:c/l})),text:`${ye(g).replace(/^./,d=>d.toUpperCase())} fragrance ${u}, created by ${e.house} in ${e.year}.${m.length?` It ${wa(m)}.`:""}`}}let ht=null;function mt(){if(ht)return ht;const e=new Map,s=(a,r)=>{const i=H(a);i&&!e.has(i)&&e.set(i,r)};for(const a of W){s(a.name,{label:a.name,id:a.id});for(const r of a.name.split(/\s*[&(),]\s*/))r.length>2&&s(r,{label:a.name,id:a.id})}for(const[a,r]of Object.entries(_s))o.ING[r]&&s(a,{label:a.charAt(0).toUpperCase()+a.slice(1),id:r,alias:!0});return ht=e}const hs=e=>[...H(e.n).split(" "),...H(o.ING[e.id].name).split(" ")];function ms(e,s){const a=H(e||""),r=t.notes.filter(u=>u.id),i=r.filter(u=>!t.found.has(u.id));if(!a&&!s)return null;const n=s||mt().get(a)?.id;let l=i.find(u=>u.id===n||H(u.n)===a);if(!l&&!s&&a.length>=3&&!a.includes(" ")&&(l=i.find(u=>hs(u).includes(a))),l)return{hit:l};const m=r.find(u=>t.found.has(u.id)&&(u.id===n||H(u.n)===a||!s&&hs(u).includes(a)));return m?{already:m}:n?t.tried.includes(n)?{repeat:n}:{miss:n}:{unknown:a}}function De(e,s){clearInterval(x),F(),C?.stop(),C=null,w=[];const a=D(),r=Ca(),i=e?le(a):j.find(l=>l.id===s)||(()=>{const l=r.filter(m=>m!==le(a)&&m.id!==t?.f?.id);return l[Math.floor(Math.random()*l.length)]})();t={kind:"scent",phase:"scent",daily:e,date:a,f:i,notes:dt(i),found:new Set,tried:[],hints:[],level:{},target:null,lives:Be,log:[],last:null,intro:!0};const n=e&&$.get(`scent:${a}`);if(fs(!0),n?.id===i.id)for(const l of n.log)ft(l,!0);n?.over&&(t.phase="done"),o.setHash(e?"play-daily":"play"),o.setTint(o.fragHex(i)),o.play.ver++,o.refresh(),t.phase==="done"?gt(!0):(xs(),Es(null),js(null),o.flyTo([24,20],1),ie(`<span class="mono">${e?we(a):"Practice scent"}</span><b>${o.esc(i.name)} <span class="g-sp-h">${o.esc(i.house)}</span></b>`))}function ft(e,s){const a=t.notes.find(r=>r.id===e.id);return e.hit?(t.found.add(e.id),t.last={id:e.id,r:e.r,isNew:!!e.isNew}):(t.tried.push(e.id),t.lives--,t.lives>0&&Aa(s)),t.log.push(e),t.lives<=0||t.notes.every(r=>!r.id||t.found.has(r.id))?t.phase="done":e.hit&&t.target===e.id&&(t.target=null,fs(s)),a}function fs(e){const s=t.notes.filter(c=>c.id&&!t.found.has(c.id));if(!s.length)return;t.spots=(t.spots||0)+1;const a=Te([...`${t.f.id}|${t.date}|${t.spots}`].reduce((c,p)=>Math.imul(c^p.charCodeAt(0),16777619),2166136261)),r=s.map(c=>Math.sqrt(1+o.USES[c.id].length));let i=a()*r.reduce((c,p)=>c+p,0),n=0;for(;n<r.length-1&&(i-=r[n])>0;)n++;const l=s[n],m=o.ING[l.id],u=R[m.family].label.toLowerCase();t.target=l.id;const g=t.level[l.id]=Math.max(2,(t.level[l.id]||0)+1),d=g===2?`One of the hidden ${l.t} notes is ${ye(u)} note, and its best-known source is ${m.country}.`:gs(l,g);if(t.hints.push({id:l.id,lv:g,text:d,spot:1}),!e){const c=performance.now()+1400;for(const p of[0,1,2])w.push({type:"ripple",loc:m.loc,t0:c+p*500,color:ve(m.family)})}}function gs(e,s){const a=o.ING[e.id],r=R[a.family].label.toLowerCase();return s===1?`One of the hidden ${e.t} notes is ${ye(r)} note.`:s===2?`That ${r} note grows in ${es(a.loc,a.country)}. The globe has turned to show you where.`:s===3?ts(`Part used: ${a.part}. How it is made: ${a.method}.`,a,!0):`It is listed as ${bs(e.n)}, ${e.n.replace(/[^\p{L}]/gu,"").length} letters starting with ${e.n.charAt(0).toUpperCase()}.`}function Aa(e){const s=t.notes.filter(n=>n.id&&!t.found.has(n.id));if(!s.length)return;let a=s.find(n=>n.id===t.target&&(t.level[n.id]||0)<4);if(a||(a=s.filter(n=>n.id!==t.target).sort((n,l)=>(t.level[n.id]||0)-(t.level[l.id]||0)||o.USES[l.id].length-o.USES[n.id].length)[0]),!a||(t.level[a.id]||0)>=4)return;const r=t.level[a.id]=(t.level[a.id]||0)+1,i=o.ING[a.id];if(t.hints.push({id:a.id,lv:r,text:gs(a,r)}),!e&&r===2){o.flyTo(i.loc,1.05);const n=performance.now()+900;for(const l of[0,1,2])w.push({type:"ripple",loc:i.loc,t0:n+l*500,color:ve(i.family)})}}const bs=e=>e.split(/\s+/).map(s=>s.charAt(0).toUpperCase()+"·".repeat(Math.max(0,[...s].length-1))).join(" ");function Oe(e,s){if(t?.kind!=="scent"||t.phase!=="scent")return;const a=ms(e,s),r=h.querySelector("[data-sc-say]"),i=h.querySelector("[data-sc-in]");if(ce(null),!a)return;const n=l=>o.esc($a(o.ING[l].name));if(a.unknown!=null){r.innerHTML=`“${o.esc(e.trim())}” isn’t a note in the atlas. Pick one from the list as you type.`,r.className="g-sc-say";return}if(a.already){r.innerHTML=`You already found <b>${o.esc(a.already.n)}</b>.`,r.className="g-sc-say",i.value="";return}if(a.repeat){r.innerHTML=`You already tried <b>${n(a.repeat)}</b>. That one’s not in it.`,r.className="g-sc-say",i.value="";return}if(i.value="",a.hit){const l=a.hit,m=o.facts.draw(l.id),u=o.facts.discover(l.id,m),g=o.facts.earn?.(l.id,m)||0;o.notes?.collect(l.id);const d=t.spots;ft({id:l.id,hit:1,r:m,isNew:u?1:0}),a.clue=t.spots!==d&&t.phase==="scent";const c=o.ING[l.id],p=o.ingHex(c),f=performance.now()+700;o.flyTo(c.loc,1.5),w.push({type:"burst",loc:c.loc,t0:f,color:p,parts:Ct(26)},{type:"float",loc:c.loc,t0:f,text:c.name,color:p}),Es(l.id),js(l.id);const b=Re(l.id);r.innerHTML=`<span class="g-pts r-${b.label.toLowerCase()}">+${b.pts}</span><b>${o.esc(l.n.charAt(0).toUpperCase()+l.n.slice(1))}</b> is in it, ${ye(l.t)} note from ${o.esc(c.country)}. ${b.label==="Rare"||b.label==="Uncommon"?`A ${b.label.toLowerCase()} find: only ${b.pct}% of perfumes list it.`:`${b.label} note, in ${b.pct}% of perfumes.`} You found ${ye(K[m].label.toLowerCase())} fact${u?"":" you already had"}${g?` and <b class="g-drops-won">${g} drops</b> of ${o.esc(l.n)} essence`:""}.${a.clue?" That was the clued note, so a new clue is below.":""}`,r.className="g-sc-say hit"}else{ft({id:a.miss,hit:0}),r.innerHTML=t.lives?`No <b>${n(a.miss)}</b> in this one. ${t.lives} chance${t.lives===1?"":"s"} left, and a sharper hint below.`:`No <b>${n(a.miss)}</b> in this one, and that was your last chance.`,r.className="g-sc-say miss";const l=h.querySelector(".g-sc-field");l.classList.remove("shake"),l.offsetWidth,l.classList.add("shake")}if(t.daily&&$.set(`scent:${t.date}`,{id:t.f.id,log:t.log,over:t.phase==="done"}),o.saved?.(),t.phase==="done")return t.fresh=a.hit?.id,gt();a.hit&&o.milestones?.({avoid:t.notes.filter(l=>l.id&&!t.found.has(l.id)).map(l=>l.id)}),t.fresh=a.hit?.id,t.justLost=!a.hit,t.freshHint=a.hit&&!a.clue?null:t.hints[t.hints.length-1]?.id,t.newHint=!a.hit||a.clue,Ia(),t.fresh=t.justLost=t.freshHint=t.newHint=null,a.hit?(Fe(h.querySelector("[data-sc-fact]"),t.last),Ta(a.hit.id),a.clue&&setTimeout(ys,900)):qa(),matchMedia("(hover: none)").matches||i.focus()}function Ta(e){const s=o.ingHex(o.ING[e]),a=h.querySelector(`[data-sc-notes] [data-id="${e}"]`);ta(h.querySelector(".g-sc-field input"),a,s).then(()=>{Qe(a,s,{n:18,spread:60}),Qt(a,s,{size:130})}),Xe(h.querySelector("#g-hero"),s,{n:10,rise:150,size:40}),Le(h.querySelector("[data-sc-count]"),"mv-bump"),Le(h.querySelector("[data-sc-say]"),"mv-in")}function qa(){for(const e of document.querySelectorAll(".g-drops svg.lost"))Xe(e,"rgba(150, 138, 126, .7)",{n:5,rise:46,size:12,at:.2});ys(),T([...h.querySelectorAll("[data-sc-tried] .badge")].slice(-1),{cls:"mv-pop"}),Le(h.querySelector(".g-sc-field input"),"flash"),Le(h.querySelector("[data-sc-say]"),"mv-in")}function ys(){const e=h.querySelector(".g-sc-hint.new span");ea(e,{ms:Math.min(1100,e?e.textContent.length*14:0),delay:250});const s=h.querySelector("[data-sc-notes] .fresh");s&&setTimeout(()=>Qt(s,getComputedStyle(s).getPropertyValue("--c")||"#888",{size:70,ms:1100}),350)}function Na(){t?.kind!=="scent"||t.phase!=="scent"||(t.phase="done",t.gaveUp=!0,t.daily&&$.set(`scent:${t.date}`,{id:t.f.id,log:t.log,over:!0}),o.saved?.(),gt())}function gt(e){t.phase="done";const s=t.notes.filter(l=>l.id).length,a=t.found.size;if(t.celebrate=!e,t.daily&&!e){const l=$.get("scent:streak");$.set("scent:streak",{last:t.date,n:l?.last===t.date?l.n:l?.last===$e(t.date)?l.n+1:1}),o.saved?.()}xs(),t.daily&&Ce.enabled()&&Ba(),e||o.milestones?.({perfect:a===s});const r=Je[t.f.house],i=t.notes.filter(l=>l.id).map(l=>o.ING[l.id]);B([...r?[{loc:r,kind:"guess",text:t.f.house,col:o.fragHex(t.f)}]:[],...i.map(l=>{const m=i.filter(g=>t.found.has(g.id)===t.found.has(l.id)).indexOf(l),u=t.found.has(l.id);return{loc:l.loc,kind:"answer",ing:l,small:!0,missed:!u,pop:!e,delay:u?400+m*220:700+t.found.size*220+m*90}})]),w=[];const n=performance.now()+(e?0:500);if(r){const l=i.filter(m=>t.found.has(m.id));l.forEach((m,u)=>w.push({type:"arc",from:m.loc,to:r,t0:e?n-2e3:n+u*220,dur:1e3,color:o.ingHex(m),keep:!0,flow:!0,phase:u/Math.max(1,l.length)}))}!e&&a===s&&w.push({type:"confetti",t0:n+400,parts:ke(),colors:[o.fragHex(t.f),O,"#cfae6e","#d9a3b5","#8fae8b"]}),o.flyTo(o.midpoint(i.map(l=>l.loc).concat(r?[r]:[])),.95),e||ie(`<span class="mono">${a===s?"Every note found":"Notes found"}</span><b>${a} / ${s}</b>`),o.play.ver++,o.refresh(),e||setTimeout(()=>{const l=document.querySelector(".g-sc-end");l&&l.getBoundingClientRect().top>innerHeight*.7&&l.scrollIntoView({block:"center",behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"})},900)}function Ha(e){if(e.given)return`<span class="badge note lab" title="Made from aroma molecules, with no single place of origin, so it is given">${o.esc(e.n)}</span>`;const s=o.ING[e.id],a=t.phase==="done"&&t.world?.n?Math.round(100*(t.world.notes[e.id]||0)/t.world.n):null,r=a==null?"":`<em class="g-pct" title="Found by ${a}% of today’s players">${a}%</em>`;if(t.found.has(e.id)){const l=Re(e.id);return`<span class="badge note tinted g-sc-n${t.fresh===e.id?" pop":""}" data-id="${e.id}" style="--c:${o.ingHex(s)}" title="${l.label}: in ${l.pct}% of perfumes"><span class="dot" style="background:${o.ingHex(s)}"></span>${o.esc(e.n)}<em class="g-chip-pts">${l.pts}</em>${r}</span>`}if(t.phase==="done")return`<span class="badge note g-sc-n missed" data-id="${e.id}" title="Not found"><span class="dot" style="background:${o.ingHex(s)}"></span>${o.esc(e.n)}${r}</span>`;const i=t.level[e.id]||0,n=i?ve(s.family):"";return`<span class="badge note g-sc-n hidden${i?" hinted":""}${t.target===e.id?" clued":""}${t.freshHint===e.id?" fresh":""}" data-id="${e.id}" ${i?`style="--c:${n}" title="${t.target===e.id?"The clued note":"Hinted"}: ${R[s.family].label.toLowerCase()}"`:'title="Hidden note"'}>${i?`<span class="dot" style="background:${n}"></span>`:""}<span class="mono">${i>=4?o.esc(bs(e.n)):"?"}</span></span>`}function bt(){return["top","heart","base"].map(e=>{const s=t.notes.filter(a=>a.t===e);return s.length?`<div class="tier"><span class="k">${ba[e]}</span><div class="notes">${s.map(Ha).join("")}</div></div>`:""}).join("")}const Ea=(e,s,a)=>`<svg viewBox="0 0 24 24" class="${e?"on":a?"lost":""}" style="--i:${s}"><path d="M12 2.6c3.4 4.4 6.4 8.1 6.4 11.6a6.4 6.4 0 0 1-12.8 0c0-3.5 3-7.2 6.4-11.6z"/></svg>`,yt=()=>Array.from({length:Be},(e,s)=>Ea(s<t.lives,s,t.justLost&&s===t.lives)).join(""),ja=['<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>','<path d="M12 21s6-5.4 6-10.3A6 6 0 0 0 6 10.7C6 15.6 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2"/>','<path d="M5 19c8 0 14-6 14-14-8 0-14 6-14 14zM5 19l7-7"/>','<path d="M4 7h16M4 12h10M4 17h7"/>'];function vs(){const e=t.phase==="scent"?t.hints.filter(s=>!t.found.has(s.id)):t.hints;return e.length?e.slice().reverse().map((s,a)=>`<div class="g-sc-hint${s.spot?" clued":""}${a===0&&t.phase==="scent"&&(t.newHint??!0)?" new":""}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ja[s.lv-1]}</svg><span>${o.esc(s.text)}</span></div>`).join(""):'<p class="g-note muted">One hidden note always has a clue. Find it and the clue moves to another note.</p>'}const $s=()=>{const e=new Set(t.hints.filter(s=>t.phase!=="scent"||!t.found.has(s.id)).map(s=>s.id)).size;return t.phase==="scent"?`${e} note${e===1?"":"s"} clued`:`${t.hints.length} in all`};function ws(){const e=t.notes.filter(s=>s.id).length;L.innerHTML=`<span class="g-hq"><b>${o.esc(t.f.name)}</b> · ${t.found.size} / ${e} notes</span><span class="g-drops" role="img" aria-label="${t.lives} chances left">${yt()}</span>`,L.classList.toggle("show",matchMedia("(max-width: 860px)").matches),S.classList.remove("show"),S.hidden=!0}function Ia(){const e=t.notes.filter(s=>s.id).length;h.querySelector("[data-sc-notes]").innerHTML=bt(),h.querySelector("[data-sc-count]").textContent=`${t.found.size} of ${e} found`,h.querySelector("[data-sc-lives]").innerHTML=yt(),h.querySelector("[data-sc-lives]").setAttribute("aria-label",`${t.lives} chances left`),h.querySelector("[data-sc-hints]").innerHTML=vs(),h.querySelector("[data-sc-hcount]").textContent=$s(),h.querySelector("[data-sc-tried]").innerHTML=ks(),ws(),Ge()}const ks=()=>t.tried.length?`<span class="mono muted">Not in it</span>${t.tried.map(e=>`<span class="badge note g-sc-n no">${o.esc(o.ING[e].name)}</span>`).join("")}`:"";function Fe(e,s){e&&s&&o.facts.mount(e,s.id,s.r,{isNew:s.isNew})}const Ss=document.querySelector('meta[name="fraguessr-thumbs"]')?.content;function Ge(){const e=h.querySelector("#g-hero"),s=e?.querySelector(".model");if(!s)return;if(Ss&&!e.dataset.live){if(s.querySelector("img.g-sc-shot"))return;const n=new Image;n.className="g-sc-shot",n.alt="",n.decoding="async",n.onload=()=>e.classList.add("loaded","still"),n.onerror=()=>{e.dataset.live="1",n.remove(),Ge()},n.src=`${Ss}h-${t.f.id}.webp`,s.append(n),e.addEventListener("pointerdown",()=>{e.dataset.live||(e.dataset.live="1",Ge())},{once:!0});return}const a=s.querySelector("img.g-sc-shot"),r=t.f,i=t.log.filter(n=>n.hit).map(n=>o.ING[n.id]).slice(-3).reverse();o.getStage().then(n=>{if(!n||!s.isConnected){e.classList.add("no-3d");return}n.mount(s);const l=o.fragHex(r),m=o.isDark();n.showFragrance(r,o.liquidFor(r),i,m?o.mix(l,"#332c27",.8):o.mix(l,"#ffffff",.88),l,m?[o.mix(l,"#141110",.82),o.mix(l,"#1d1916",.72)]:[o.mix(l,"#fffdfa",.84),o.mix(l,"#f3ede4",.7)]),n.ready().then(()=>{a?.remove(),e.classList.remove("still"),requestAnimationFrame(()=>e.classList.add("loaded"))})})}function Pa(){const e=r=>h.querySelectorAll(r),s=t.intro,a=t.celebrate;if(t.intro=t.celebrate=!1,t.fresh=null,s&&(Zt(h.querySelector(".g-scent .body .title"),{delay:120,step:34}),T(e(".g-scent .detail-top .g-drops svg"),{cls:"mv-drip",step:90,delay:250}),T(e(".g-scent .body > .badges .badge"),{cls:"mv-pop",step:60,delay:380}),T(e(".g-sc-prof i"),{cls:"mv-grow",step:110,delay:560}),T(e(".g-scent .body > .prose, .g-scent .body > .section-h"),{step:90,delay:640}),T(e("[data-sc-notes] .badge"),{cls:"mv-deal",step:45,delay:820,max:30}),T(e(".g-sc-guess, .g-sc-hints, .g-sc-tried, .g-sc-quit"),{step:90,delay:1150})),a){Xs(h.querySelector(".g-big [data-n]"),{ms:900,delay:250}),Zt(h.querySelector(".g-sc-end .title"),{delay:300,step:30}),T(e(".g-sc-end .prose, .g-sc-end .g-meter, .g-sc-end .g-note"),{step:120,delay:500}),T(e("[data-sc-notes] .missed"),{cls:"mv-deal",step:70,delay:700,max:20}),T(e(".g-sc-cards .badge"),{cls:"mv-pop",step:60,delay:900});const r=t.found.size===t.notes.filter(n=>n.id).length,i=o.fragHex(t.f);r&&setTimeout(()=>{for(const n of e("[data-sc-notes] .badge")){const l=o.ING[n.dataset.id];Qe(n,l?o.ingHex(l):i,{n:8,spread:36,stars:3})}},700),setTimeout(()=>Xe(h.querySelector("#g-hero"),i,{n:r?16:8,rise:170,size:46}),200)}}function vt(){const e=t.notes.filter(i=>i.id).length,s=lt([...t.found],t.lives,e).total,a=t.daily&&St(t.date),r=a?.done?`
+📍 ${a.rounds.map(i=>be(i.points)).join("")} ${As(a).toLocaleString("en")}`:"";return`Fraguessr ${t.daily?we(t.date):"practice scent"}
+${t.f.name}: ${t.found.size}/${e} notes · ${s.toLocaleString("en")} pts
+${t.log.map(i=>i.hit?Re(i.id).sq:"🟥").join("")}${"💧".repeat(t.lives)}${r}
+${Oa}`}async function Ba(){const e=t,s=t.date;$.get("scent:sent")!==s&&await Ce.submit(s,[...t.found])&&$.set("scent:sent",s);const a=await Ce.load(s);if(t!==e)return;t.world=a&&a.n?a:null;const r=h.querySelector("[data-sc-world]");r&&(r.outerHTML=Ms(),h.querySelector("[data-sc-notes]").innerHTML=bt(),t.world&&(T(h.querySelectorAll(".g-hist i"),{cls:"mv-pop",step:40,delay:100}),T(h.querySelectorAll(".g-pct"),{cls:"mv-pop",step:50,delay:300})))}function Ms(){const e=t.world;if(e===void 0)return'<div class="g-sc-world wait" data-sc-world><span class="mono">Everyone today</span><p>Counting today’s players…</p></div>';if(!e)return"";const s=t.notes.filter(f=>f.id).map(f=>f.id),a=s.length,r=t.found.size,i=e.n,n=f=>e.score[f]||0,l=s.reduce((f,b,v)=>f+(v<r?n(v):0),0),m=Math.max(1,...Array.from({length:a+1},(f,b)=>n(b))),u=f=>(e.notes[f]||0)/i,g=f=>o.esc(t.notes.find(b=>b.id===f).n),d=[...t.found].sort((f,b)=>u(f)-u(b))[0],c=s.slice().sort((f,b)=>u(f)-u(b))[0],p=[i===1?"You are the first to finish today’s scent.":`<b>${i.toLocaleString()}</b> players have finished today’s scent. You found more notes than <b>${Math.round(100*l/i)}%</b> of them.`];return i>1&&d&&p.push(`Your rarest find was <b>${g(d)}</b>, found by ${Math.round(100*u(d))}% of players.`),i>1&&c&&c!==d&&p.push(`The hardest note today is <b>${g(c)}</b>, found by ${Math.round(100*u(c))}%.`),`<div class="g-sc-world" data-sc-world><span class="mono">Everyone today</span>
+    <div class="g-hist" role="img" aria-label="How many notes players found">${Array.from({length:a+1},(f,b)=>`<i class="${b===r?"me":""}" style="--h:${n(b)/m}" title="${n(b)} player${n(b)===1?"":"s"} found ${b}"><b></b><span>${b}</span></i>`).join("")}</div>
+    ${p.map(f=>`<p>${f}</p>`).join("")}</div>`}function xs(){const e=t.f,s=La(e,t.notes),a=t.notes.filter(c=>c.id).length,r=t.phase==="done",i=t.found.size,[,n,l]=va.find(([c])=>i/a>=c-1e-9),m=$.get("scent:streak"),u=Math.max(1,Math.ceil((Date.parse(t.date)+864e5-Date.now())/6e4)),g=t.log.filter(c=>c.hit);h.innerHTML=`
     <div class="game g-scent">
-      <div class="detail-top">${S.daily ? '' : '<button class="btn icon ghost" data-act="exit" aria-label="Back to the atlas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>'}
-        <div class="crumbs"><b>${S.daily ? dailyName(S.date) : 'Practice scent'}</b></div>
-        <span class="g-drops g-total" data-sc-lives role="img" aria-label="${S.lives} chances left">${scentDrops()}</span></div>
+      <div class="detail-top">${t.daily?"":'<button class="btn icon ghost" data-act="exit" aria-label="Back to the atlas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>'}
+        <div class="crumbs"><b>${t.daily?we(t.date):"Practice scent"}</b></div>
+        <span class="g-drops g-total" data-sc-lives role="img" aria-label="${t.lives} chances left">${yt()}</span></div>
       <div class="hero frag g-sc-hero" id="g-hero"><div class="model"></div></div>
       <div class="body">
-        <div class="g-sc-head"><h2 class="title">${A.esc(f.name)}</h2><div class="g-sc-meta">${A.esc(f.house)} · ${f.year} · ${A.esc(f.audience === 'Unisex' ? 'Unisex' : f.audience === 'Men' ? 'Masculine' : 'Feminine')}</div></div>
-        <div class="badges"><span class="badge accent" style="text-transform:capitalize">${A.esc(prof.genre)}</span>${prof.fams.slice(0, 3).map(({ fm }) => `<span class="badge"><span class="dot" style="background:${famHex(fm)}"></span>${FAMILIES[fm].label}</span>`).join('')}</div>
-        <div class="g-sc-prof" role="img" aria-label="Scent profile: ${prof.fams.map(({ fm, p }) => `${FAMILIES[fm].label} ${Math.round(p * 100)}%`).join(', ')}">${prof.fams.map(({ fm, p }) => `<i style="--c:${famHex(fm)};--p:${p}" title="${FAMILIES[fm].label} ${Math.round(p * 100)}%"></i>`).join('')}</div>
-        <p class="prose g-sc-about">${A.esc(prof.text)}</p>
-        ${done ? `<div class="g-sc-end">
-          <div class="g-sc-score"><div class="g-big mono"><b data-n>${got}</b><span>/${total}</span></div><div><h2 class="title">${verdict}</h2><p class="prose">${line}</p></div></div>
-          <div class="g-meter"><i style="--p:${got / total}"></i></div>
-          ${(() => { const p = scentPoints([...S.found], S.lives, total), best = S.daily ? dailyStats().bestScore : 0; return `<div class="g-sc-pts"><span class="muted">Score</span><b class="mono">${p.total.toLocaleString('en')}</b><span class="muted">${p.bonus ? `incl. ${p.bonus} for drops left` : 'rarer notes score more'}${best > p.total ? ` · best ${best.toLocaleString('en')}` : best && best === p.total && dailyStats().played > 1 ? ' · your best' : ''}</span></div>`; })()}
-          <div class="g-sc-cta"><button class="btn primary" data-act="scent-share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>Share result</button>${S.daily ? `<button class="btn" data-act="stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</button>` : ''}</div>
-          <div class="g-share" hidden><code id="g-sharetext">${A.esc(scentShare())}</code></div>
-          ${S.daily && Stats.enabled() ? worldHtml() : ''}
-          <p class="g-note muted">${S.daily ? `${streak?.last === S.date && streak.n > 1 ? `${streak.n}-day streak. ` : ''}Today’s scent is played. The next one arrives in ${until >= 60 ? `${Math.floor(until / 60)} h ` : ''}${until % 60} min.` : 'Practice scents don’t count toward the daily streak.'}</p>
-          ${S.daily ? bonusCard() : ''}
-          ${(() => { const n = A.nextMilestone?.(); return n ? `<div class="g-sc-next"><span class="mono">Next milestone</span><b>${A.esc(n.name)}</b><span>${A.esc(n.goal)} · ${n.have.toLocaleString()} of ${n.need.toLocaleString()} · pays a bonus ${n.reward} fact</span><i style="--p:${Math.round(100 * n.have / n.need)}%"></i></div>` : ''; })()}
-        </div>` : ''}
-        <div class="section-h"><span>Notes</span><span class="mono muted" data-sc-count>${got} of ${total} found</span></div>
-        <div class="pyramid" data-sc-notes>${scentPyramid()}</div>
-        ${done ? '' : `<div class="g-sc-guess">
+        <div class="g-sc-head"><h2 class="title">${o.esc(e.name)}</h2><div class="g-sc-meta">${o.esc(e.house)} · ${e.year} · ${o.esc(e.audience==="Unisex"?"Unisex":e.audience==="Men"?"Masculine":"Feminine")}</div></div>
+        <div class="badges"><span class="badge accent" style="text-transform:capitalize">${o.esc(s.genre)}</span>${s.fams.slice(0,3).map(({fm:c})=>`<span class="badge"><span class="dot" style="background:${ve(c)}"></span>${R[c].label}</span>`).join("")}</div>
+        <div class="g-sc-prof" role="img" aria-label="Scent profile: ${s.fams.map(({fm:c,p})=>`${R[c].label} ${Math.round(p*100)}%`).join(", ")}">${s.fams.map(({fm:c,p})=>`<i style="--c:${ve(c)};--p:${p}" title="${R[c].label} ${Math.round(p*100)}%"></i>`).join("")}</div>
+        <p class="prose g-sc-about">${o.esc(s.text)}</p>
+        ${r?`<div class="g-sc-end">
+          <div class="g-sc-score"><div class="g-big mono"><b data-n>${i}</b><span>/${a}</span></div><div><h2 class="title">${n}</h2><p class="prose">${l}</p></div></div>
+          <div class="g-meter"><i style="--p:${i/a}"></i></div>
+          ${(()=>{const c=lt([...t.found],t.lives,a),p=t.daily?$t().bestScore:0;return`<div class="g-sc-pts"><span class="muted">Score</span><b class="mono">${c.total.toLocaleString("en")}</b><span class="muted">${c.bonus?`incl. ${c.bonus} for drops left`:"rarer notes score more"}${p>c.total?` · best ${p.toLocaleString("en")}`:p&&p===c.total&&$t().played>1?" · your best":""}</span></div>`})()}
+          <div class="g-sc-cta"><button class="btn primary" data-act="scent-share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>Share result</button>${t.daily?'<button class="btn" data-act="stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>Stats</button>':""}</div>
+          <div class="g-share" hidden><code id="g-sharetext">${o.esc(vt())}</code></div>
+          ${t.daily&&Ce.enabled()?Ms():""}
+          <p class="g-note muted">${t.daily?`${m?.last===t.date&&m.n>1?`${m.n}-day streak. `:""}Today’s scent is played. The next one arrives in ${u>=60?`${Math.floor(u/60)} h `:""}${u%60} min.`:"Practice scents don’t count toward the daily streak."}</p>
+          ${t.daily?Ka():""}
+          ${(()=>{const c=o.nextMilestone?.();return c?`<div class="g-sc-next"><span class="mono">Next milestone</span><b>${o.esc(c.name)}</b><span>${o.esc(c.goal)} · ${c.have.toLocaleString()} of ${c.need.toLocaleString()} · pays a bonus ${c.reward} fact</span><i style="--p:${Math.round(100*c.have/c.need)}%"></i></div>`:""})()}
+        </div>`:""}
+        <div class="section-h"><span>Notes</span><span class="mono muted" data-sc-count>${i} of ${a} found</span></div>
+        <div class="pyramid" data-sc-notes>${bt()}</div>
+        ${r?"":`<div class="g-sc-guess">
           <div class="g-sc-field"><input data-sc-in placeholder="Name a note, like bergamot" autocomplete="off" spellcheck="false" enterkeyhint="go" role="combobox" aria-expanded="false" aria-controls="g-sc-sug" aria-label="Guess a note"><button class="btn primary" data-act="scent-guess">Guess</button>
             <div class="g-sc-sug" id="g-sc-sug" role="listbox" hidden></div></div>
-          <p class="g-sc-say" data-sc-say aria-live="polite">${S.log.length ? '' : `${total} notes to find and ${SCENT_LIVES} chances. Each one you name deals one of its fun facts.`}</p>
+          <p class="g-sc-say" data-sc-say aria-live="polite">${t.log.length?"":`${a} notes to find and ${Be} chances. Each one you name deals one of its fun facts.`}</p>
         </div>`}
         <div class="g-sc-fact" data-sc-fact></div>
-        ${done ? `${cards.length ? `<div class="section-h"><span>Facts from today</span><span class="mono muted">${A.facts.count().toLocaleString()} / ${A.facts.total.toLocaleString()} collected</span></div>
-          <div class="notes g-sc-cards">${cards.map((c) => `<button class="badge note g-sc-card${c.id === S.last?.id ? ' on' : ''}" data-act="scent-fact" data-id="${c.id}" data-r="${c.r}" style="--r:${RARITY[c.r].col}"><span class="fc-pips">${'<i></i>'.repeat(RARITY[c.r].pips)}</span>${A.esc(A.ING[c.id].name)}</button>`).join('')}</div>` : ''}
-          <div class="section-h"><span>About ${A.esc(f.name)}</span></div><p class="prose">${A.esc(A.describe(f).text)}</p>
-          <div class="g-more"><button class="btn ghost" data-act="exit">Explore the atlas</button><button class="btn ghost" data-act="collection">Your collection</button><button class="btn ghost" data-act="games">Practice games</button></div>`
-        : `<div class="section-h"><span>Hints</span><span class="mono muted" data-sc-hcount>${hintCount()}</span></div>
-          <div class="g-sc-hints" data-sc-hints>${scentHints()}</div>
-          <div class="g-sc-tried notes" data-sc-tried>${scentTried()}</div>
+        ${r?`${g.length?`<div class="section-h"><span>Facts from today</span><span class="mono muted">${o.facts.count().toLocaleString()} / ${o.facts.total.toLocaleString()} collected</span></div>
+          <div class="notes g-sc-cards">${g.map(c=>`<button class="badge note g-sc-card${c.id===t.last?.id?" on":""}" data-act="scent-fact" data-id="${c.id}" data-r="${c.r}" style="--r:${K[c.r].col}"><span class="fc-pips">${"<i></i>".repeat(K[c.r].pips)}</span>${o.esc(o.ING[c.id].name)}</button>`).join("")}</div>`:""}
+          <div class="section-h"><span>About ${o.esc(e.name)}</span></div><p class="prose">${o.esc(o.describe(e).text)}</p>
+          <div class="g-more"><button class="btn ghost" data-act="exit">Explore the atlas</button><button class="btn ghost" data-act="collection">Your collection</button><button class="btn ghost" data-act="games">Practice games</button></div>`:`<div class="section-h"><span>Hints</span><span class="mono muted" data-sc-hcount>${$s()}</span></div>
+          <div class="g-sc-hints" data-sc-hints>${vs()}</div>
+          <div class="g-sc-tried notes" data-sc-tried>${ks()}</div>
           <button class="btn ghost g-sc-quit" data-act="scent-giveup">Give up and reveal the notes</button>`}
       </div>
-    </div>`;
-  gameTop();
-  enter(gameEl.querySelector('.game')); enter(gameEl.querySelector('.body'));
-  scentChoreo();
-  scentHud(); scentHero();
-  scentFact(gameEl.querySelector('[data-sc-fact]'), S.last);
-  const input = gameEl.querySelector('[data-sc-in]');
-  if (input) {
-    input.addEventListener('input', () => scentSug(input.value));
-    input.addEventListener('click', () => scentSug(input.value));
-    input.addEventListener('keydown', scentKeys);
-    gameEl.querySelector('.g-sc-sug').addEventListener('pointerdown', (e) => e.preventDefault());
-    input.addEventListener('blur', () => setTimeout(() => { if (!gameEl.contains(document.activeElement) || document.activeElement !== input) scentSug(null); }, 150));
-  }
-}
-// suggestions: tapping the empty box lists every note A to Z; typing narrows it to every note with a name or word that starts with it, still A to Z
-function scentSug(q) {
-  const box = gameEl.querySelector('.g-sc-sug'), input = gameEl.querySelector('[data-sc-in]'); if (!box) return;
-  const close = () => { box.hidden = true; box.innerHTML = ''; input?.setAttribute('aria-expanded', 'false'); };
-  if (q == null) return close();
-  const n = norm(q), byId = new Map();
-  if (!n) for (const i of INGREDIENTS) byId.set(i.id, { label: i.name, id: i.id });
-  else for (const [k, v] of noteIndex()) {
-    if (!(k.startsWith(n) || k.split(' ').some((w) => w.startsWith(n)))) continue;
-    // one row per note: its own name when that matches, otherwise the first matching other name
-    const had = byId.get(v.id);
-    if (!had || (had.alias && (!v.alias || v.label.localeCompare(had.label) < 0))) byId.set(v.id, v);
-  }
-  const out = [...byId.values()].sort((x, y) => x.label.localeCompare(y.label, 'en', { sensitivity: 'base' }));
-  if (!out.length) return close();
-  // highlight the exact name, else the first name that starts with what was typed, so Enter takes the likeliest note
-  const ex = out.findIndex((v) => norm(v.label) === n), pre = out.findIndex((v) => norm(v.label).startsWith(n)), on = !n ? -1 : ex >= 0 ? ex : Math.max(pre, 0);
-  let letter = '';
-  box.innerHTML = `<div class="g-sc-sh">${n ? `${out.length} ${out.length === 1 ? 'note matches' : 'notes match'}` : `All ${out.length} notes, A to Z`}</div>` + out.map((v, k) => {
-    const ing = A.ING[v.id], used = S.tried.includes(v.id) || S.found.has(v.id), l = v.label.charAt(0).toUpperCase();
-    const head = !n && l !== letter ? `<div class="g-sc-l" aria-hidden="true">${A.esc((letter = l))}</div>` : '';
-    return `${head}<button type="button" role="option" class="${k === on ? 'on' : ''}" data-act="scent-pick" data-id="${v.id}" data-label="${A.esc(v.label)}" ${used ? 'aria-disabled="true"' : ''}><span class="dot" style="background:${A.ingHex(ing)}"></span><span>${A.esc(v.label)}</span>${v.alias && norm(v.label) !== norm(ing.name) ? `<em>${A.esc(ing.name)}</em>` : ''}${used ? `<em>${S.found.has(v.id) ? 'found' : 'tried'}</em>` : ''}</button>`;
-  }).join('');
-  const opening = box.hidden;
-  box.scrollTop = 0; box.hidden = false; input.setAttribute('aria-expanded', 'true');
-  box.querySelector('button.on')?.scrollIntoView({ block: 'nearest' });
-  // when the list opens past the bottom of the screen, move the box up so the list has room
-  if (opening && box.getBoundingClientRect().bottom > innerHeight) box.parentElement.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-}
-function scentKeys(e) {
-  const box = gameEl.querySelector('.g-sc-sug'), opts = box && !box.hidden ? [...box.querySelectorAll('button')] : [];
-  const at = opts.findIndex((o) => o.classList.contains('on'));
-  if (e.key === 'ArrowDown' && !opts.length) { e.preventDefault(); scentSug(e.target.value); return; }
-  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && opts.length) {
-    e.preventDefault(); const k = (at + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length;
-    opts.forEach((o, i) => o.classList.toggle('on', i === k)); opts[k].scrollIntoView({ block: 'nearest' });
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    // what was typed wins when it names a note exactly ("rose"); otherwise take the highlighted suggestion
-    const typed = e.target.value, exact = noteIndex().has(norm(typed)) || scentResolve(typed)?.hit;
-    if (!exact && opts[at]) scentGuess(opts[at].dataset.label, opts[at].dataset.id); else scentGuess(typed);
-  } else if (e.key === 'Escape' && opts.length) { e.preventDefault(); e.stopPropagation(); scentSug(null); }
-}
-function scentCard() {
-  const d = today(), f = scentOf(d), st = store.get(`scent:${d}`), total = scentSize(f), streak = store.get('scent:streak');
-  const done = st?.id === f.id && st.over, started = st?.id === f.id && st.log.length, got = started ? st.log.filter((e) => e.hit).length : 0;
-  const live = streak && (streak.last === d || streak.last === prevDay(d)) ? streak.n : 0;
-  return `<button class="g-scent-card${done ? ' done' : ''}" data-act="scent" style="--c:${A.fragHex(f)}">
+    </div>`,V(),q(h.querySelector(".game")),q(h.querySelector(".body")),Pa(),ws(),Ge(),Fe(h.querySelector("[data-sc-fact]"),t.last);const d=h.querySelector("[data-sc-in]");d&&(d.addEventListener("input",()=>ce(d.value)),d.addEventListener("click",()=>ce(d.value)),d.addEventListener("keydown",Ra),h.querySelector(".g-sc-sug").addEventListener("pointerdown",c=>c.preventDefault()),d.addEventListener("blur",()=>setTimeout(()=>{(!h.contains(document.activeElement)||document.activeElement!==d)&&ce(null)},150)))}function ce(e){const s=h.querySelector(".g-sc-sug"),a=h.querySelector("[data-sc-in]");if(!s)return;const r=()=>{s.hidden=!0,s.innerHTML="",a?.setAttribute("aria-expanded","false")};if(e==null)return r();const i=H(e),n=new Map;if(i)for(const[p,f]of mt()){if(!(p.startsWith(i)||p.split(" ").some(v=>v.startsWith(i))))continue;const b=n.get(f.id);(!b||b.alias&&(!f.alias||f.label.localeCompare(b.label)<0))&&n.set(f.id,f)}else for(const p of W)n.set(p.id,{label:p.name,id:p.id});const l=[...n.values()].sort((p,f)=>p.label.localeCompare(f.label,"en",{sensitivity:"base"}));if(!l.length)return r();const m=l.findIndex(p=>H(p.label)===i),u=l.findIndex(p=>H(p.label).startsWith(i)),g=i?m>=0?m:Math.max(u,0):-1;let d="";s.innerHTML=`<div class="g-sc-sh">${i?`${l.length} ${l.length===1?"note matches":"notes match"}`:`All ${l.length} notes, A to Z`}</div>`+l.map((p,f)=>{const b=o.ING[p.id],v=t.tried.includes(p.id)||t.found.has(p.id),k=p.label.charAt(0).toUpperCase();return`${!i&&k!==d?`<div class="g-sc-l" aria-hidden="true">${o.esc(d=k)}</div>`:""}<button type="button" role="option" class="${f===g?"on":""}" data-act="scent-pick" data-id="${p.id}" data-label="${o.esc(p.label)}" ${v?'aria-disabled="true"':""}><span class="dot" style="background:${o.ingHex(b)}"></span><span>${o.esc(p.label)}</span>${p.alias&&H(p.label)!==H(b.name)?`<em>${o.esc(b.name)}</em>`:""}${v?`<em>${t.found.has(p.id)?"found":"tried"}</em>`:""}</button>`}).join("");const c=s.hidden;s.scrollTop=0,s.hidden=!1,a.setAttribute("aria-expanded","true"),s.querySelector("button.on")?.scrollIntoView({block:"nearest"}),c&&s.getBoundingClientRect().bottom>innerHeight&&s.parentElement.scrollIntoView({block:"start",behavior:matchMedia("(prefers-reduced-motion: reduce)").matches?"auto":"smooth"})}function Ra(e){const s=h.querySelector(".g-sc-sug"),a=s&&!s.hidden?[...s.querySelectorAll("button")]:[],r=a.findIndex(i=>i.classList.contains("on"));if(e.key==="ArrowDown"&&!a.length){e.preventDefault(),ce(e.target.value);return}if((e.key==="ArrowDown"||e.key==="ArrowUp")&&a.length){e.preventDefault();const i=(r+(e.key==="ArrowDown"?1:-1)+a.length)%a.length;a.forEach((n,l)=>n.classList.toggle("on",l===i)),a[i].scrollIntoView({block:"nearest"})}else if(e.key==="Enter"){e.preventDefault();const i=e.target.value;!(mt().has(H(i))||ms(i)?.hit)&&a[r]?Oe(a[r].dataset.label,a[r].dataset.id):Oe(i)}else e.key==="Escape"&&a.length&&(e.preventDefault(),e.stopPropagation(),ce(null))}function za(){const e=D(),s=le(e),a=$.get(`scent:${e}`),r=te(s),i=$.get("scent:streak"),n=a?.id===s.id&&a.over,l=a?.id===s.id&&a.log.length,m=l?a.log.filter(g=>g.hit).length:0,u=i&&(i.last===e||i.last===$e(e))?i.n:0;return`<button class="g-scent-card${n?" done":""}" data-act="scent" style="--c:${o.fragHex(s)}">
       <span class="g-sc-bottle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="9" width="12" height="12" rx="2.5"/><path d="M10 9V6h4v3M9 3h6"/><path d="M9 15h6" opacity=".6"/></svg></span>
-      <span class="g-sc-txt"><span class="mono"><span class="g-live"></span>Daily scent · ${dayLabel(d)}${live > 1 ? ` · ${live}-day streak` : ''}</span>
-        <b>${A.esc(f.name)} <em>${A.esc(f.house)}</em></b>
-        <span>${done ? `You named ${got} of ${total} notes. See your result.` : started ? `${got} of ${total} notes found so far. Pick up where you left off.` : `Name its ${total} notes with five chances. Every one you find deals a fun fact.`}</span></span>
+      <span class="g-sc-txt"><span class="mono"><span class="g-live"></span>Daily scent · ${ct(e)}${u>1?` · ${u}-day streak`:""}</span>
+        <b>${o.esc(s.name)} <em>${o.esc(s.house)}</em></b>
+        <span>${n?`You named ${m} of ${r} notes. See your result.`:l?`${m} of ${r} notes found so far. Pick up where you left off.`:`Name its ${r} notes with five chances. Every one you find deals a fun fact.`}</span></span>
       <span class="g-sc-go" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg></span>
-    </button>`;
-}
-
-// ── daily number, stats and how to play ──────────────────
-const LAUNCH = '2026-10-20', SITE = 'fraguessr.com';
-const dayNumber = (d) => Math.floor((Date.parse(d) - Date.parse(LAUNCH)) / 864e5) + 1;
-const dailyName = (d) => (dayNumber(d) >= 1 ? `Daily #${dayNumber(d)} · ${dayLabel(d)}` : `Daily · ${dayLabel(d)}`);
-// every finished daily kept in this browser: [{ date, f, total, got, lives }], oldest first
-function dailyHistory() {
-  const out = [];
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const m = /^noteguessr:scent:(\d{4}-\d{2}-\d{2})$/.exec(localStorage.key(i) || ''); if (!m) continue;
-      const v = store.get(`scent:${m[1]}`), f = v && FRAGRANCES.find((x) => x.id === v.id);
-      if (!v?.over || !f) continue;
-      const found = v.log.filter((e) => e.hit).map((e) => e.id), lives = SCENT_LIVES - v.log.filter((e) => !e.hit).length, total = scentSize(f);
-      out.push({ date: m[1], f, total, got: found.length, lives, pts: scentPoints(found, Math.max(0, lives), total).total });
-    }
-  } catch {}
-  return out.sort((a, b) => a.date.localeCompare(b.date));
-}
-export function dailyStats() {
-  const h = dailyHistory(), d = today(), st = store.get('scent:streak');
-  let best = 0, run = 0, prev = null;
-  for (const x of h) { run = prev && prevDay(x.date) === prev ? run + 1 : 1; best = Math.max(best, run); prev = x.date; }
-  const streak = st && (st.last === d || st.last === prevDay(d)) ? st.n : 0;
-  const buckets = [[1, 'Every note'], [0.75, '75% or more'], [0.5, '50% or more'], [0.25, '25% or more'], [0, 'Under 25%']];
-  const bucketOf = (x) => buckets.findIndex(([p]) => x.got / x.total >= p - 1e-9);
-  const dist = buckets.map(([, label], k) => ({ label, n: h.filter((x) => bucketOf(x) === k).length }));
-  const todays = h.find((x) => x.date === d);
-  return { played: h.length, perfect: h.filter((x) => x.got === x.total).length, avg: h.length ? Math.round(100 * h.reduce((a, x) => a + x.got / x.total, 0) / h.length) : 0,
-    streak, best: Math.max(best, streak), dist, mine: todays ? bucketOf(todays) : -1, todays,
-    bestScore: Math.max(0, ...h.map((x) => x.pts)), avgScore: h.length ? Math.round(h.reduce((a, x) => a + x.pts, 0) / h.length) : 0 };
-}
-const untilNext = () => { const ms = Date.parse(today()) + 864e5 - Date.now(), t = Math.max(0, Math.floor(ms / 1000)); return [Math.floor(t / 3600), Math.floor(t / 60) % 60, t % 60].map((v) => String(v).padStart(2, '0')).join(':'); };
-// one modal sheet at a time, built on <dialog> so focus, Escape and the backdrop come for free
-let sheet = null, sheetTimer = 0;
-function openSheet(html, cls) {
-  if (!sheet) {
-    sheet = document.createElement('dialog'); sheet.className = 'sheet'; document.body.append(sheet);
-    sheet.addEventListener('click', (e) => {
-      if (e.target === sheet) return sheet.close();
-      const b = e.target.closest('[data-sheet]'); if (!b) return;
-      const act = b.dataset.sheet;
-      if (act === 'close') sheet.close();
-      else if (act === 'play') { sheet.close(); if (A?.play.active) showDaily(); else document.getElementById('play')?.click(); }
-      else if (act === 'share') { const st = S?.kind === 'scent' && S.daily && S.phase === 'done' ? scentShare() : null; if (st) shareOut(st, b); }
-      else if (act === 'explore') { sheet.close(); document.getElementById('m-explore')?.click(); }
-    });
-    sheet.addEventListener('close', () => { clearInterval(sheetTimer); });
-  }
-  clearInterval(sheetTimer);
-  sheet.className = 'sheet ' + (cls || '');
-  sheet.innerHTML = `<div class="sheet-in"><button class="btn icon ghost sheet-x" data-sheet="close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>${html}</div>`;
-  if (!sheet.open) sheet.showModal();
-  const clock = sheet.querySelector('[data-clock]');
-  if (clock) sheetTimer = setInterval(() => { if (!sheet.open) return clearInterval(sheetTimer); clock.textContent = untilNext(); }, 1000);
-}
-export function openHelp() {
-  store.set('help', 1);
-  const drop = '<svg viewBox="0 0 24 24"><path d="M12 2.6c3.4 4.4 6.4 8.1 6.4 11.6a6.4 6.4 0 0 1-12.8 0c0-3.5 3-7.2 6.4-11.6z"/></svg>';
-  openSheet(`<h2>How to play</h2>
+    </button>`}const Da="2026-10-20",Oa="fraguessr.com",Cs=e=>Math.floor((Date.parse(e)-Date.parse(Da))/864e5)+1,we=e=>Cs(e)>=1?`Daily #${Cs(e)} · ${ct(e)}`:`Daily · ${ct(e)}`;function Fa(){const e=[];try{for(let s=0;s<localStorage.length;s++){const a=/^noteguessr:scent:(\d{4}-\d{2}-\d{2})$/.exec(localStorage.key(s)||"");if(!a)continue;const r=$.get(`scent:${a[1]}`),i=r&&j.find(u=>u.id===r.id);if(!r?.over||!i)continue;const n=r.log.filter(u=>u.hit).map(u=>u.id),l=Be-r.log.filter(u=>!u.hit).length,m=te(i);e.push({date:a[1],f:i,total:m,got:n.length,lives:l,pts:lt(n,Math.max(0,l),m).total})}}catch{}return e.sort((s,a)=>s.date.localeCompare(a.date))}function $t(){const e=Fa(),s=D(),a=$.get("scent:streak");let r=0,i=0,n=null;for(const c of e)i=n&&$e(c.date)===n?i+1:1,r=Math.max(r,i),n=c.date;const l=a&&(a.last===s||a.last===$e(s))?a.n:0,m=[[1,"Every note"],[.75,"75% or more"],[.5,"50% or more"],[.25,"25% or more"],[0,"Under 25%"]],u=c=>m.findIndex(([p])=>c.got/c.total>=p-1e-9),g=m.map(([,c],p)=>({label:c,n:e.filter(f=>u(f)===p).length})),d=e.find(c=>c.date===s);return{played:e.length,perfect:e.filter(c=>c.got===c.total).length,avg:e.length?Math.round(100*e.reduce((c,p)=>c+p.got/p.total,0)/e.length):0,streak:l,best:Math.max(r,l),dist:g,mine:d?u(d):-1,todays:d,bestScore:Math.max(0,...e.map(c=>c.pts)),avgScore:e.length?Math.round(e.reduce((c,p)=>c+p.pts,0)/e.length):0}}const Ls=()=>{const e=Date.parse(D())+864e5-Date.now(),s=Math.max(0,Math.floor(e/1e3));return[Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(a=>String(a).padStart(2,"0")).join(":")};let M=null,Ue=0;function wt(e,s){M||(M=document.createElement("dialog"),M.className="sheet",document.body.append(M),M.addEventListener("click",r=>{if(r.target===M)return M.close();const i=r.target.closest("[data-sheet]");if(!i)return;const n=i.dataset.sheet;if(n==="close")M.close();else if(n==="play")M.close(),o?.play.active?_a():document.getElementById("play")?.click();else if(n==="share"){const l=t?.kind==="scent"&&t.daily&&t.phase==="done"?vt():null;l&&Ns(l,i)}else n==="explore"&&(M.close(),document.getElementById("m-explore")?.click())}),M.addEventListener("close",()=>{clearInterval(Ue)})),clearInterval(Ue),M.className="sheet "+(s||""),M.innerHTML=`<div class="sheet-in"><button class="btn icon ghost sheet-x" data-sheet="close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>${e}</div>`,M.open||M.showModal();const a=M.querySelector("[data-clock]");a&&(Ue=setInterval(()=>{if(!M.open)return clearInterval(Ue);a.textContent=Ls()},1e3))}function Ga(){$.set("help",1),wt(`<h2>How to play</h2>
     <p class="sheet-lede">Every day there is one famous perfume. Name the notes it is made from.</p>
     <ol class="sheet-steps">
       <li><b>Type a note</b><span>Anything you think is in it: bergamot, rose, vanilla, oud… A right one lights up on the globe where it grows.</span></li>
-      <li><b>Rarer notes score more</b><span>A classic like bergamot is worth ${RARE[0][2]}. A note few perfumes use is worth up to ${RARE[3][2]}.</span></li>
-      <li><b>Mind your drops</b><span>You have five <i class="sheet-drop">${drop}</i>. A wrong note costs one and sharpens the clue.</span></li>
+      <li><b>Rarer notes score more</b><span>A classic like bergamot is worth ${it[0][2]}. A note few perfumes use is worth up to ${it[3][2]}.</span></li>
+      <li><b>Mind your drops</b><span>You have five <i class="sheet-drop"><svg viewBox="0 0 24 24"><path d="M12 2.6c3.4 4.4 6.4 8.1 6.4 11.6a6.4 6.4 0 0 1-12.8 0c0-3.5 3-7.2 6.4-11.6z"/></svg></i>. A wrong note costs one and sharpens the clue.</span></li>
       <li><b>Follow the clue</b><span>One hidden note always has a clue: its tier, family and the country it comes from. Find that note and a new clue appears for another one.</span></li>
       <li><b>Come back tomorrow</b><span>Everyone gets the same perfume. A new one arrives at midnight UTC.</span></li>
     </ol>
     <button class="btn primary sheet-go" data-sheet="play" autofocus>Play today’s scent</button>
-    <p class="sheet-foot muted">Between dailies, <button class="linkish" data-sheet="explore">explore the atlas</button> of ${INGREDIENTS.length} ingredients and ${FRAGRANCES.length} perfumes.</p>`, 'help');
-}
-export function openStats() {
-  const s = dailyStats(), top = Math.max(1, ...s.dist.map((x) => x.n)), played = !!s.todays;
-  openSheet(`<h2>Your stats</h2>
-    <div class="sheet-nums">${[[s.played, 'Played'], [`${s.avg}%`, 'Notes found'], [s.perfect, 'Perfect'], [s.streak, 'Streak'], [s.best, 'Best streak']].map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div>
-    ${s.played ? `<div class="sheet-score"><span>Best score <b class="mono">${s.bestScore.toLocaleString('en')}</b></span><span>Average <b class="mono">${s.avgScore.toLocaleString('en')}</b></span>${s.todays ? `<span>Today <b class="mono">${s.todays.pts.toLocaleString('en')}</b></span>` : ''}</div>` : ''}
+    <p class="sheet-foot muted">Between dailies, <button class="linkish" data-sheet="explore">explore the atlas</button> of ${W.length} ingredients and ${j.length} perfumes.</p>`,"help")}function Ua(){const e=$t(),s=Math.max(1,...e.dist.map(r=>r.n)),a=!!e.todays;wt(`<h2>Your stats</h2>
+    <div class="sheet-nums">${[[e.played,"Played"],[`${e.avg}%`,"Notes found"],[e.perfect,"Perfect"],[e.streak,"Streak"],[e.best,"Best streak"]].map(([r,i])=>`<div><b>${r}</b><span>${i}</span></div>`).join("")}</div>
+    ${e.played?`<div class="sheet-score"><span>Best score <b class="mono">${e.bestScore.toLocaleString("en")}</b></span><span>Average <b class="mono">${e.avgScore.toLocaleString("en")}</b></span>${e.todays?`<span>Today <b class="mono">${e.todays.pts.toLocaleString("en")}</b></span>`:""}</div>`:""}
     <h3>Notes found per day</h3>
-    <div class="sheet-dist">${s.dist.map((x, k) => `<div class="${k === s.mine ? 'me' : ''}"><span>${x.label}</span><i style="--w:${Math.max(x.n ? 0.08 : 0, x.n / top)}"><b>${x.n}</b></i></div>`).join('')}</div>
-    <div class="sheet-next"><div><span class="muted">Next scent in</span><b class="mono" data-clock>${untilNext()}</b></div>
-      ${played ? '<button class="btn primary" data-sheet="share" autofocus><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg><span>Share</span></button>' : '<button class="btn primary" data-sheet="play" autofocus>Play today’s scent</button>'}</div>
-    ${s.played ? '' : '<p class="sheet-foot muted">Your numbers start with your first daily scent. They are kept in this browser.</p>'}`, 'stats');
-}
-// ── daily bonus: pin three of today's notes on the globe, GeoGuessr style ──
-const BONUS_ROUNDS = 3;
-function bonusRounds(date) {
-  const f = scentOf(date), r = rng(hash('fraguessr:geo:' + date)), ids = [...new Set(scentNotes(f).filter((x) => x.id).map((x) => x.id))];
-  for (let i = ids.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [ids[i], ids[j]] = [ids[j], ids[i]]; }
-  // prefer notes from different countries, so the three pins spread over the map
-  const out = [], seen = new Set();
-  for (const id of ids) if (out.length < BONUS_ROUNDS && !seen.has(ING_BY[id].country)) { out.push(id); seen.add(ING_BY[id].country); }
-  for (const id of ids) if (out.length < BONUS_ROUNDS && !out.includes(id)) out.push(id);
-  return out.map((id) => ({ ing: ING_BY[id] }));
-}
-// today's bonus so far: { rounds: [{ id, guess, km, points }], done }
-const bonusSaved = (date) => store.get(`geo:${date}`);
-const bonusTotal = (b) => (b?.rounds || []).reduce((a, x) => a + x.points, 0);
-function startBonus() {
-  const date = today(), saved = bonusSaved(date), rounds = bonusRounds(date);
-  S = rules({ mode: 'notes', timed: false, seed: hash(date), rounds, i: -1, results: [], total: 0, bonus: date });
-  // a round already locked in today stays as it was
-  for (const x of saved?.rounds || []) { const R = rounds[S.results.length]; if (!R || R.ing.id !== x.id) break; S.results.push({ ing: R.ing, guess: x.guess, km: x.km, points: x.points, clues: 0, sc: scoreRound({ km: x.km, clues: 0, free: 0 }) }); S.total += x.points; }
-  S.i = S.results.length - 1;
-  A.setHash('play-daily');
-  if (saved?.done || S.results.length >= rounds.length) return summary();
-  next();
-}
-function bonusCard() {
-  const b = bonusSaved(S.date), n = BONUS_ROUNDS, max = (n * MAX).toLocaleString('en');
-  if (b?.done) return `<div class="g-bonus-card done"><div><span class="mono">Daily bonus</span><b>${bonusTotal(b).toLocaleString('en')} <em>/ ${max}</em></b><span>${b.rounds.map((x) => square(x.points)).join('')} You pinned ${n} of today’s notes.</span></div><button class="btn" data-act="bonus">See it</button></div>`;
-  const started = b?.rounds?.length;
-  return `<div class="g-bonus-card"><div><span class="mono">Daily bonus</span><b>Where do they grow?</b><span>${started ? `${b.rounds.length} of ${n} pinned so far.` : `Pin ${n} of today’s notes on the globe. Up to ${max} points, GeoGuessr style.`}</span></div><button class="btn primary" data-act="bonus">${started ? 'Carry on' : 'Play'}</button></div>`;
-}
-
-// ── the daily chest (streak.js): opened from the login bar along the top, apart from the daily scent; the login
-// streak sets how much is inside. The app hands in what it needs, so the chest opens whether or not a game has started.
-export function openDailyChest(api) {
-  const L = loginState();
-  if (L.opened) return seeDailyChest(api);
-  // facts from any note but today's scent's, which would give answers away
-  const got = api.facts.chest(dailyInfo().notes, L.chest.n, L.chest.best);
-  markOpened(); store.set(`chest:${L.today}`, got); api.saved?.();
-  chestSheet(api, got, loginState(), true);
-}
-export function seeDailyChest(api) { const L = loginState(), got = store.get(`chest:${L.today}`); if (got) chestSheet(api, got, L, false); }
-const BY_RARITY = ['legendary', 'epic', 'rare', 'uncommon', 'common'];
-function chestSheet(api, got, L, fresh) {
-  const list = got.slice().sort((a, b) => BY_RARITY.indexOf(a.r) - BY_RARITY.indexOf(b.r));
-  const drops = got.reduce((n, x) => n + (x.drops || 0), 0), news = got.filter((x) => x.isNew).length;
-  const week = `<div class="g-chest-week" aria-label="Day ${L.rung + 1} of 7 of the week’s sets">${LADDER.map((x, k) => `<i class="${k < L.rung ? 'past' : k === L.rung ? 'now' : ''}" style="--r:${RARITY[x.best].col}" title="Day ${k + 1}: ${x.n} facts, ${rarer(x.best)}"><b>${k + 1}</b></i>`).join('')}</div>`;
-  openSheet(`<div class="chest-head"><span class="g-chest-ico big${fresh ? ' fresh' : ''}">${CHEST}</span><div><span class="chest-kicker mono">${L.n > 1 ? `Day ${L.n} of your streak` : 'Day 1 of your streak'}</span><h2>Today’s discovery set</h2><p class="sheet-lede">${got.length} sample vials, each holding a fact${news === got.length ? '' : ` (${news} new)`}, and ${drops} drops of essence for the lab.</p></div></div>
-    <div class="chest-row">${list.map((x, k) => `<button type="button" class="badge note chest-chip${k ? '' : ' on'}" data-chest="${k}" style="--r:${RARITY[x.r].col}"><span class="cf-vial" style="--fill:${RARITY[x.r].pips / 5}" title="${RARITY[x.r].label}"></span>${api.esc(api.ING[x.id].name)}${x.isNew ? '<em>New</em>' : ''}</button>`).join('')}</div>
+    <div class="sheet-dist">${e.dist.map((r,i)=>`<div class="${i===e.mine?"me":""}"><span>${r.label}</span><i style="--w:${Math.max(r.n?.08:0,r.n/s)}"><b>${r.n}</b></i></div>`).join("")}</div>
+    <div class="sheet-next"><div><span class="muted">Next scent in</span><b class="mono" data-clock>${Ls()}</b></div>
+      ${a?'<button class="btn primary" data-sheet="share" autofocus><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13"/></svg><span>Share</span></button>':'<button class="btn primary" data-sheet="play" autofocus>Play today’s scent</button>'}</div>
+    ${e.played?"":'<p class="sheet-foot muted">Your numbers start with your first daily scent. They are kept in this browser.</p>'}`,"stats")}const kt=3;function Ya(e){const s=le(e),a=Te(tt("fraguessr:geo:"+e)),r=[...new Set(dt(s).filter(l=>l.id).map(l=>l.id))];for(let l=r.length-1;l>0;l--){const m=Math.floor(a()*(l+1));[r[l],r[m]]=[r[m],r[l]]}const i=[],n=new Set;for(const l of r)i.length<kt&&!n.has(ze[l].country)&&(i.push(l),n.add(ze[l].country));for(const l of r)i.length<kt&&!i.includes(l)&&i.push(l);return i.map(l=>({ing:ze[l]}))}const St=e=>$.get(`geo:${e}`),As=e=>(e?.rounds||[]).reduce((s,a)=>s+a.points,0);function Wa(){const e=D(),s=St(e),a=Ya(e);t=ge({mode:"notes",timed:!1,seed:tt(e),rounds:a,i:-1,results:[],total:0,bonus:e});for(const r of s?.rounds||[]){const i=a[t.results.length];if(!i||i.ing.id!==r.id)break;t.results.push({ing:i.ing,guess:r.guess,km:r.km,points:r.points,clues:0,sc:qe({km:r.km,clues:0,free:0})}),t.total+=r.points}if(t.i=t.results.length-1,o.setHash("play-daily"),s?.done||t.results.length>=a.length)return ls();re()}function Ka(){const e=St(t.date),s=kt,a=(s*A).toLocaleString("en");if(e?.done)return`<div class="g-bonus-card done"><div><span class="mono">Daily bonus</span><b>${As(e).toLocaleString("en")} <em>/ ${a}</em></b><span>${e.rounds.map(i=>be(i.points)).join("")} You pinned ${s} of today’s notes.</span></div><button class="btn" data-act="bonus">See it</button></div>`;const r=e?.rounds?.length;return`<div class="g-bonus-card"><div><span class="mono">Daily bonus</span><b>Where do they grow?</b><span>${r?`${e.rounds.length} of ${s} pinned so far.`:`Pin ${s} of today’s notes on the globe. Up to ${a} points, GeoGuessr style.`}</span></div><button class="btn primary" data-act="bonus">${r?"Carry on":"Play"}</button></div>`}function Hn(e){const s=Ze();if(s.opened)return Va(e);const a=e.facts.chest(Sa().notes,s.chest.n,s.chest.best);Qs(),$.set(`chest:${s.today}`,a),e.saved?.(),qs(e,a,Ze(),!0)}function Va(e){const s=Ze(),a=$.get(`chest:${s.today}`);a&&qs(e,a,s,!1)}const Ts=["legendary","epic","rare","uncommon","common"];function qs(e,s,a,r){const i=s.slice().sort((d,c)=>Ts.indexOf(d.r)-Ts.indexOf(c.r)),n=s.reduce((d,c)=>d+(c.drops||0),0),l=s.filter(d=>d.isNew).length,m=`<div class="g-chest-week" aria-label="Day ${a.rung+1} of 7 of the week’s sets">${Js.map((d,c)=>`<i class="${c<a.rung?"past":c===a.rung?"now":""}" style="--r:${K[d.best].col}" title="Day ${c+1}: ${d.n} facts, ${Jt(d.best)}"><b>${c+1}</b></i>`).join("")}</div>`;wt(`<div class="chest-head"><span class="g-chest-ico big${r?" fresh":""}">${Zs}</span><div><span class="chest-kicker mono">${a.n>1?`Day ${a.n} of your streak`:"Day 1 of your streak"}</span><h2>Today’s discovery set</h2><p class="sheet-lede">${s.length} sample vials, each holding a fact${l===s.length?"":` (${l} new)`}, and ${n} drops of essence for the lab.</p></div></div>
+    <div class="chest-row">${i.map((d,c)=>`<button type="button" class="badge note chest-chip${c?"":" on"}" data-chest="${c}" style="--r:${K[d.r].col}"><span class="cf-vial" style="--fill:${K[d.r].pips/5}" title="${K[d.r].label}"></span>${e.esc(e.ING[d.id].name)}${d.isNew?"<em>New</em>":""}</button>`).join("")}</div>
     <div class="chest-slot"></div>
-    <div class="chest-next">${week}<span>Tomorrow: ${L.tomorrow.n} facts, ${rarer(L.tomorrow.best)}. Each day in a row adds to the set, up to a legendary on day 7; miss a day and the streak starts over.</span></div>
-    <button class="btn sheet-go" data-sheet="close">Done</button>`, 'chest-sheet');
-  const slot = sheet.querySelector('.chest-slot');
-  const show = (k) => { const x = list[k]; api.facts.mount(slot, x.id, x.r, { isNew: x.isNew }); sheet.querySelectorAll('.chest-chip').forEach((c, j) => { c.classList.toggle('on', j === k); c.setAttribute('aria-pressed', String(j === k)); }); };
-  sheet.querySelectorAll('.chest-chip').forEach((c) => c.addEventListener('click', () => show(Number(c.dataset.chest))));
-  show(0);
-  if (fresh) { cascade(sheet.querySelectorAll('.chest-chip'), { cls: 'mv-pop', step: 90, delay: 250 }); setTimeout(() => burst(sheet.querySelector('.g-chest-ico'), RARITY[list[0].r].col, { n: 26, spread: 90, stars: 9 }), 200); }
-}
-
-// back to today's scent from anywhere in the game
-export function showDaily() {
-  if (!A) return;
-  if (S?.kind === 'scent' && S.daily) return;
-  if (NET) leaveRoom();
-  clearInterval(timer);
-  scentOpen(true);
-}
-// on a phone the system share sheet, elsewhere the clipboard
-function shareOut(text, b, fail) {
-  if (navigator.share && matchMedia('(hover: none)').matches) { navigator.share({ text }).catch(() => {}); return; }
-  copyText(text, b, 'Copied', fail);
-}
-
-// ── panel + keys ─────────────────────────────────────────
-function onPanelClick(e) {
-  const m = e.target.closest('.g-mode');
-  if (m) {
-    gameEl.querySelectorAll('.g-mode').forEach((x) => x.setAttribute('aria-checked', String(x === m)));
-    if (NET?.host && gameEl.querySelector('[data-roomscreen]')) { NET.gm = { ...NET.gm, mode: m.dataset.mode }; store.set('mode', m.dataset.mode); pub({ gm: NET.gm }); }
-    return;
-  }
-  const w = e.target.closest('[data-who]');
-  if (w) {
-    gameEl.querySelectorAll('[data-who]').forEach((x) => x.setAttribute('aria-selected', String(x === w)));
-    gameEl.querySelectorAll('[data-whop]').forEach((x) => { x.hidden = x.dataset.whop !== w.dataset.who; });
-    gameEl.querySelector('[data-startlabel]').textContent = WHO[w.dataset.who].start;
-    store.set('who', w.dataset.who);
-    return;
-  }
-  const col = e.target.closest('[data-col]');
-  if (col) { setMe({ col: col.dataset.col }); gameEl.querySelectorAll('[data-col]').forEach((x) => x.setAttribute('aria-pressed', String(x === col))); return; }
-  const b = e.target.closest('[data-act]'); if (!b) return;
-  const act = b.dataset.act;
-  if (act === 'exit') leave();
-  else if (act === 'collection') { leave(); A.collection?.(); }
-  else if (act === 'lobby') lobby(S?.mode, S?.mp ? (S.mp.kind === 'local' ? 'local' : 'online') : null);
-  else if (act === 'start') start();
-  else if (act === 'scent') scentOpen(true);
-  else if (act === 'bonus') startBonus();
-  else if (act === 'games') { S = null; lobby(); }
-  else if (act === 'stats') openStats();
-  else if (act === 'scent-guess') scentGuess(gameEl.querySelector('[data-sc-in]')?.value || '');
-  else if (act === 'scent-pick') scentGuess(b.dataset.label, b.dataset.id);
-  else if (act === 'scent-giveup') { if (b.dataset.sure) scentGiveUp(); else { b.dataset.sure = '1'; b.textContent = 'Tap again to reveal every note'; } }
-  else if (act === 'scent-share') shareOut(scentShare(), b, selectShare);
-  else if (act === 'scent-fact') { gameEl.querySelectorAll('.g-sc-card').forEach((x) => x.classList.toggle('on', x === b)); S.last = S.log.find((e) => e.hit && e.id === b.dataset.id); scentFact(gameEl.querySelector('[data-sc-fact]'), S.last); }
-  else if (act === 'guess') submit();
-  else if (act === 'next') advance();
-  else if (act === 'again') playAgain();
-  else if (act === 'turn') beginTurn();
-  else if (act === 'join') { const code = (gameEl.querySelector('[data-code]')?.value || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (code.length !== 4) return netNote('Room codes are four letters or numbers.'); enterRoom(code, false); }
-  else if (act === 'join-open') enterRoom(b.dataset.code, false);
-  else if (act === 'leave-room') { leaveRoom(); lobby(null, 'online'); }
-  else if (act === 'start-room') startOnline();
-  else if (act === 'to-room') backToRoom();
-  else if (act === 'copy-code') copyText(NET?.code || '', b, 'Copied');
-  else if (act === 'lp-add') { const ps = localPlayers(); if (ps.length < MAX_LOCAL) { const used = new Set(ps.map((p) => p.col)); ps.push({ nm: `Player ${ps.length + 1}`, col: PLAYER_COLORS.find((c) => !used.has(c)) }); store.set('local', ps); gameEl.querySelector('[data-local]').innerHTML = localRows(); gameEl.querySelector(`[data-lp="${ps.length - 1}"]`)?.focus(); } }
-  else if (act === 'lp-del') { const ps = localPlayers(); ps.splice(+b.dataset.k, 1); store.set('local', ps); gameEl.querySelector('[data-local]').innerHTML = localRows(); }
-  else if (act === 'clue') { if (S.phase !== 'guess' || +b.dataset.k !== S.clues) return; S.clues++; const c = gameEl.querySelectorAll('.g-clue'); c[S.clues - 1].classList.add('open'); c[S.clues - 1].querySelector('.mono').textContent = 'revealed'; c[S.clues]?.querySelector('button').removeAttribute('disabled'); const w = gameEl.querySelector('.g-max b'); w.textContent = worth(); w.classList.remove('dip'); void w.offsetWidth; w.classList.add('dip'); }
-  else if (act === 'share') {
-    const t = S.mp ? mpShareText() : shareText(RANKS.find(([n]) => S.total >= n * (S.rounds.length * MAX / 25000))[1]);
-    copyText(t, b, 'Copied', selectShare);
-  }
-}
-function copyText(t, b, done, fail) {
-  const label = b.lastChild, was = label.textContent;
-  const ok = () => { label.textContent = done; setTimeout(() => { if (b.isConnected) label.textContent = was; }, 1600); };
-  const p = navigator.clipboard?.writeText(t);
-  if (p) p.then(ok, () => fail?.()); else fail?.();
-}
-function selectShare() { const el = gameEl.querySelector('#g-sharetext'); if (!el) return; el.parentElement.hidden = false; const r = document.createRange(); r.selectNodeContents(el); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
-function onKey(e) {
-  if (e.key === 'Escape') { if (S?.bonus || (S && S.kind !== 'scent' && S.phase !== 'done')) lobby(S.mode); else leave(); return; }
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  if (e.target.closest?.('button, input')) return;
-  if (S?.phase === 'guess' && S.guess) { e.preventDefault(); submit(); }
-  else if (S?.phase === 'reveal') { e.preventDefault(); advance(); }
-  else if (S?.phase === 'pass') { e.preventDefault(); beginTurn(); }
-}
-// the floating button doubles as "play again" on the results screen
-function fabAction() { if (S?.phase === 'guess') submit(); else if (S?.phase === 'reveal') advance(); else if (S?.phase === 'pass') beginTurn(); else if (S?.phase === 'done') playAgain(); }
-
-// ── globe: markers, arcs, pins ───────────────────────────
-const RGB = (hex) => { const n = parseInt(hex.slice(1), 16); return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255]; };
-function markers() {
-  if (!S) return [];
-  if (S.kind === 'scent') return S.notes.filter((x) => x.id && (S.found.has(x.id) || S.phase === 'done')).map((x) => { const ing = A.ING[x.id], got = S.found.has(x.id); return { location: ing.loc, size: got ? 0.026 : 0.014, color: got ? RGB(A.ingHex(ing)) : A.isDark() ? [0.45, 0.45, 0.5] : [0.6, 0.6, 0.64] }; });
-  const ink = A.isDark() ? [1, 1, 1] : [0.09, 0.09, 0.11];
-  const out = [];
-  const list = S.phase === 'done' ? S.results : S.phase === 'reveal' ? [S.results[S.i]] : [];
-  for (const r of list) { if (r.arrived || S.phase === 'done') out.push({ location: r.ing.loc, size: 0.024, color: RGB(A.ingHex(r.ing)) }); if (r.guess) out.push({ location: r.guess, size: 0.016, color: ink }); }
-  if (S.phase === 'guess' && S.guess) out.push({ location: S.guess, size: 0.016, color: ink });
-  if (S.mp && S.phase === 'reveal' && S.results[S.i]?.arrived) for (const p of roster()) { const r = p.results[S.i]; if (!p.me && r?.guess) out.push({ location: r.guess, size: 0.014, color: RGB(p.col) }); }
-  return out;
-}
-function arcs() { return []; }
-// the daily scent's map: the perfume house, a bead for every note found so far (the newest one named),
-// and from each a glowing thread back to the house with a drop of the note's colour travelling along it
-function scentPins(fresh) {
-  const home = HOUSES[S.f.house];
-  setPins([...(home ? [{ loc: home, kind: 'guess', small: !fresh, text: S.f.house, col: A.fragHex(S.f) }] : []),
-    ...S.log.filter((e) => e.hit).map((e) => { const ing = A.ING[e.id], now = e.id === fresh; return { loc: ing.loc, kind: 'answer', ing, small: !now, text: now ? ing.name : '', pop: now }; })]);
-}
-function scentLinks(fresh) {
-  const home = HOUSES[S.f.house]; if (!home) return;
-  const now = performance.now();
-  fxItems = fxItems.filter((it) => !it.link);
-  S.log.filter((e) => e.hit).forEach((e, k) => { const ing = A.ING[e.id];
-    fxItems.push({ type: 'arc', link: true, flow: true, from: ing.loc, to: home, t0: e.id === fresh ? now + 1250 : now - 2000, dur: 1100, color: A.ingHex(ing), keep: true, phase: (k * 0.37) % 1 }); });
-}
-function clearPins() { for (const p of pins) p.el.remove(); pins = []; }
-function setPins(list) {
-  clearPins();
-  for (const p of list) {
-    const el = document.createElement('div');
-    el.className = `g-pin ${p.kind}${p.small ? ' small' : ''}${p.missed ? ' missed' : ''}${p.pop ? ' pop' : ''}`;
-    if (p.ing) el.style.setProperty('--pin', p.missed ? (A.isDark() ? '#6f6760' : '#b3aaa0') : A.ingHex(p.ing));
-    if (p.delay) el.style.setProperty('--d', `${p.delay}ms`);
-    if (p.col) { el.style.setProperty('--pin-lo', p.col); el.style.setProperty('--pin-hi', A.mix(p.col, '#ffffff', 0.3)); }
-    const gid = `gpg${++pinSeq}`;
-    el.innerHTML = p.kind === 'guess'
-      ? `<i class="g-gs"></i><svg viewBox="0 0 24 32" aria-hidden="true"><defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--pin-hi)"/><stop offset="1" stop-color="var(--pin-lo)"/></linearGradient></defs><path d="M12 31s10-11 10-19A10 10 0 0 0 2 12c0 8 10 19 10 19z" fill="url(#${gid})"/><circle cx="12" cy="12" r="4.2"/></svg>${p.text ? `<span>${A.esc(p.text)}</span>` : ''}`
-      : `<i></i><i></i><b></b>${p.text ? `<span>${A.esc(p.text)}</span>` : ''}`;
-    A.els.labels.appendChild(el); pins.push({ el, loc: p.loc });
-  }
-}
-function drawPins() {
-  for (const p of pins) { const q = A.project(p.loc); p.el.style.transform = `translate(${q.x}px, ${q.y}px)`; p.el.classList.toggle('hidden', !q.front || q.z < -0.05); }
-}
-
-
-// ── fx layer: arcs, ripples, bursts, confetti, cursor ─────
-const calm = matchMedia('(prefers-reduced-motion: reduce)');
-const ease = (t) => 1 - Math.pow(1 - t, 3);
-const toV = ([lat, lng]) => { const a = lat * Math.PI / 180, b = lng * Math.PI / 180; return [Math.cos(a) * Math.cos(b), Math.cos(a) * Math.sin(b), Math.sin(a)]; };
-const toLL = ([x, y, z]) => [Math.asin(Math.max(-1, Math.min(1, z))) * 180 / Math.PI, Math.atan2(y, x) * 180 / Math.PI];
-function slerp(a, b, t, w) {
-  if (w < 1e-6) return a;
-  const s = Math.sin(w), p = Math.sin((1 - t) * w) / s, q = Math.sin(t * w) / s;
-  return [a[0] * p + b[0] * q, a[1] * p + b[1] * q, a[2] * p + b[2] * q];
-}
-function sparks(n) {
-  return Array.from({ length: n }, (_, k) => { const a = (k / n) * Math.PI * 2 + Math.random() * 0.4, v = 60 + Math.random() * 110; return { vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40, r: 1.2 + Math.random() * 2 }; });
-}
-function confetti() {
-  return Array.from({ length: 120 }, () => ({ x: Math.random(), y: -0.1 - Math.random() * 0.3, vy: 0.25 + Math.random() * 0.35, sway: Math.random() * 6, rot: Math.random() * 6, vr: (Math.random() - 0.5) * 10, w: 5 + Math.random() * 5, h: 3 + Math.random() * 4, c: Math.floor(Math.random() * 8) }));
-}
-let fxDrawn = true;
-function frame() {
-  drawPins();
-  if (!fx) return;
-  // nothing to animate and nothing left on the layer: skip clearing the full-screen canvas every frame
-  const aiming = S?.phase === 'guess' && mouse && !(matchMedia('(hover: none)').matches);
-  if (!fxItems.length && !aiming && !fxDrawn) return;
-  fxDrawn = fxItems.length > 0 || aiming;
-  const st = A.els.stage, W = st.clientWidth, H = st.clientHeight, dpr = Math.min(2, devicePixelRatio || 1);
-  if (fx.width !== Math.round(W * dpr) || fx.height !== Math.round(H * dpr)) { fx.width = Math.round(W * dpr); fx.height = Math.round(H * dpr); }
-  const c = fctx; c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
-  const now = performance.now(), still = calm.matches;
-  // callbacks (an arc landing) can add items mid-pass; collect those separately so none are lost
-  const items = fxItems; fxItems = [];
-  const kept = items.filter((it) => {
-    const e = now - it.t0;
-    if (e < 0) return true;
-    switch (it.type) {
-      case 'arc': {
-        const t = still ? 1 : Math.min(1, e / it.dur), k = ease(t);
-        const a = toV(it.from), b = toV(it.to), w = Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])));
-        const lift = Math.min(0.1, w * 0.07), N = 48, at = (s) => A.project(toLL(slerp(a, b, s, w)), 0.01 + Math.sin(Math.PI * s) * lift);
-        c.lineWidth = it.faint ? 1.2 : it.flow ? 1.8 : 2; c.lineCap = 'round'; c.strokeStyle = it.color; c.setLineDash(it.faint ? [2, 5] : []);
-        c.shadowColor = it.color; c.shadowBlur = it.faint ? 0 : 8; c.globalAlpha = it.flow && t >= 1 ? 0.7 : 1;
-        c.beginPath(); let pen = false, head = null;
-        for (let i = 0; i <= N; i++) {
-          const s = (i / N) * k, q = at(s);
-          if (!q.front) { pen = false; continue; }
-          pen ? c.lineTo(q.x, q.y) : c.moveTo(q.x, q.y); pen = true; head = q;
-        }
-        c.stroke(); c.shadowBlur = 0; c.globalAlpha = 1; c.setLineDash([]);
-        // once drawn, a drop of the note keeps travelling down the thread to the house, fading in and out at the ends
-        if (it.flow && t >= 1 && !still) {
-          const u = ((now / 2600 + (it.phase || 0)) % 1), q = at(u);
-          if (q.front) {
-            c.globalAlpha = Math.min(1, Math.sin(Math.PI * u) * 1.6);
-            c.fillStyle = it.color; c.shadowColor = it.color; c.shadowBlur = 12;
-            c.beginPath(); c.arc(q.x, q.y, 3.2, 0, 7); c.fill(); c.shadowBlur = 0;
-            c.fillStyle = 'rgba(255,255,255,.85)'; c.beginPath(); c.arc(q.x, q.y, 1.3, 0, 7); c.fill(); c.globalAlpha = 1;
-          }
-        }
-        if (head && t < 1) { c.fillStyle = it.color; c.beginPath(); c.arc(head.x, head.y, 4, 0, 7); c.fill(); c.fillStyle = 'rgba(255,255,255,.9)'; c.beginPath(); c.arc(head.x, head.y, 1.6, 0, 7); c.fill(); }
-        if (t >= 1 && it.done) { const d = it.done; it.done = null; d(); }
-        return t < 1 || it.keep;
-      }
-      case 'ripple': {
-        const t = e / 900; if (t >= 1 || still) return false;
-        const q = A.project(it.loc); if (!q.front) return true;
-        for (const off of [0, 0.25]) { const u = t - off; if (u <= 0) continue; c.globalAlpha = (1 - u) * 0.8; c.strokeStyle = it.color; c.lineWidth = 2 * (1 - u) + 0.5; c.beginPath(); c.arc(q.x, q.y, 6 + ease(u) * 34, 0, 7); c.stroke(); }
-        c.globalAlpha = 1; return true;
-      }
-      case 'burst': {
-        const t = e / 1100; if (t >= 1 || still) return false;
-        const q = A.project(it.loc); if (!q.front) return true;
-        const s = e / 1000; c.fillStyle = it.color;
-        for (const p of it.parts) { c.globalAlpha = 1 - t; c.beginPath(); c.arc(q.x + p.vx * s * (1 - s * 0.4), q.y + p.vy * s + 160 * s * s, p.r * (1 - t * 0.5), 0, 7); c.fill(); }
-        c.globalAlpha = 1 - t; c.strokeStyle = it.color; c.lineWidth = 2; c.beginPath(); c.arc(q.x, q.y, 10 + ease(Math.min(1, t * 1.6)) * 46, 0, 7); c.stroke();
-        c.globalAlpha = 1; return true;
-      }
-      case 'float': {
-        const t = e / 1500; if (t >= 1) return false;
-        const q = A.project(it.loc); if (!q.front) return true;
-        const y = q.y - 26 - ease(t) * 34;
-        c.globalAlpha = t < 0.15 ? t / 0.15 : t > 0.7 ? (1 - t) / 0.3 : 1;
-        c.font = '600 15px Inter, system-ui, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-        c.lineWidth = 4; c.strokeStyle = A.isDark() ? 'rgba(9,9,11,.85)' : 'rgba(255,255,255,.92)'; c.strokeText(it.text, q.x, y);
-        c.fillStyle = it.color; c.fillText(it.text, q.x, y); c.globalAlpha = 1; return true;
-      }
-      case 'label': {
-        const t = Math.min(1, e / 450); if (S?.phase !== 'reveal' && S?.phase !== 'done') return false;
-        const a = toV(it.from), b = toV(it.to), w = Math.acos(Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1] + a[2] * b[2])));
-        const q = A.project(toLL(slerp(a, b, 0.5, w)), 0.01 + Math.min(0.1, w * 0.07)); if (!q.front) return true;
-        c.font = '600 12px ui-monospace, SFMono-Regular, Menlo, monospace'; c.textAlign = 'center'; c.textBaseline = 'middle';
-        const tw = c.measureText(it.text).width + 18, y = q.y - 4 - (1 - ease(t)) * 8;
-        c.globalAlpha = ease(t); c.fillStyle = it.color; c.shadowColor = 'rgba(0,0,0,.25)'; c.shadowBlur = 8; c.shadowOffsetY = 2;
-        c.beginPath(); c.roundRect(q.x - tw / 2, y - 11, tw, 22, 11); c.fill(); c.shadowBlur = 0; c.shadowOffsetY = 0;
-        c.fillStyle = '#fff'; c.fillText(it.text, q.x, y + 0.5); c.globalAlpha = 1; return true;
-      }
-      case 'confetti': {
-        const t = e / 2600; if (t >= 1 || still) return false;
-        const s = e / 1000; c.globalAlpha = t > 0.75 ? (1 - t) / 0.25 : 1;
-        for (const p of it.parts) {
-          const x = (p.x + Math.sin(s * 2 + p.sway) * 0.02) * W, y = (p.y + p.vy * s + 0.12 * s * s) * H;
-          c.save(); c.translate(x, y); c.rotate(p.rot + p.vr * s); c.scale(1, Math.cos(s * 6 + p.sway)); c.fillStyle = it.colors[p.c % it.colors.length]; c.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); c.restore();
-        }
-        c.globalAlpha = 1; return true;
-      }
-    }
-    return false;
-  });
-  fxItems = kept.concat(fxItems);
-  if (S?.phase === 'guess' && mouse && !(matchMedia('(hover: none)').matches)) {
-    const ll = A.unproject(mouse[0], mouse[1]);
-    if (ll) {
-      const [x, y] = mouse, r = 14 + Math.sin(now / 260) * 1.5;
-      c.strokeStyle = accent; c.lineWidth = 1.5; c.setLineDash([4, 4]); c.lineDashOffset = -now / 60;
-      c.beginPath(); c.arc(x, y, r, 0, 7); c.stroke(); c.setLineDash([]);
-      c.beginPath(); c.moveTo(x - r - 6, y); c.lineTo(x - r + 4, y); c.moveTo(x + r - 4, y); c.lineTo(x + r + 6, y); c.moveTo(x, y - r - 6); c.lineTo(x, y - r + 4); c.moveTo(x, y + r - 4); c.lineTo(x, y + r + 6); c.stroke();
-      const txt = `${Math.abs(ll[0]).toFixed(1)}°${ll[0] >= 0 ? 'N' : 'S'}  ${Math.abs(ll[1]).toFixed(1)}°${ll[1] >= 0 ? 'E' : 'W'}`;
-      c.font = '500 11px ui-monospace, SFMono-Regular, Menlo, monospace'; c.textAlign = 'left'; c.textBaseline = 'middle';
-      const tw = c.measureText(txt).width, bx = x + r + 10, by = y + r + 4;
-      c.fillStyle = A.isDark() ? 'rgba(24,24,27,.86)' : 'rgba(255,255,255,.9)'; c.beginPath(); c.roundRect(bx - 6, by - 10, tw + 12, 20, 6); c.fill();
-      c.fillStyle = A.isDark() ? '#e7e0d6' : '#4a413a'; c.fillText(txt, bx, by);
-    }
-  }
-}
-
-// ── multiplayer ──────────────────────────────────────────
-// Two ways to play together. Same device: up to four players take turns on each round, passing the device,
-// and every pin lands together at the end of the round. Online: a room with a four-letter code. Everything
-// travels in presence, so anyone who can open the page can play: each player shares a name, a colour and
-// their pins, the host also shares the game (seed, mode, round, phase), and every page scores everyone
-// from the same seed. If the host leaves, the next player in the room picks the game up where it was.
-const WHO = {
-  solo: { label: 'Solo', start: `Start ${ROUNDS} rounds`, icon: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>' },
-  online: { label: 'Online room', start: 'Create a room', icon: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>' },
-  local: { label: 'Same device', start: 'Start pass and play', icon: '<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18h2"/>' },
-};
-const PLAYER_COLORS = ['#c4513f', '#0090ff', '#4f8f63', '#8e4ec6', '#f76b15', '#12a594', '#d6409f', '#e2a336'];
-const NICK_A = ['Amber', 'Neroli', 'Vetiver', 'Iris', 'Oud', 'Musk', 'Cedar', 'Saffron', 'Jasmine', 'Tonka', 'Vanilla', 'Bergamot', 'Myrrh', 'Mimosa'];
-const NICK_B = ['Fox', 'Otter', 'Heron', 'Lynx', 'Moth', 'Wren', 'Hare', 'Finch', 'Koi', 'Ibis', 'Gecko', 'Owl', 'Bee', 'Seal'];
-const CODE_CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', MAX_LOCAL = 4, ROOM_RE = /^[A-Z0-9]{4}$/;
-const MEDALS = ['🥇', '🥈', '🥉'];
-const cleanName = (s, fb) => (String(s ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '').trim().slice(0, 18) || fb);
-const cleanColor = (c, k) => (/^#[0-9a-f]{6}$/i.test(c) ? c : PLAYER_COLORS[k % PLAYER_COLORS.length]);
-const initial = (nm) => [...nm.trim()][0]?.toUpperCase() || '?';
-const pick1 = (a) => a[Math.floor(Math.random() * a.length)];
-const newId = () => Math.random().toString(36).slice(2, 10);
-const newSeed = () => (Math.random() * 2 ** 32) >>> 0;
-const colorDots = (cur) => PLAYER_COLORS.map((c) => `<button class="g-col" data-col="${c}" style="--c:${c}" aria-pressed="${c === cur}" aria-label="Colour ${c}"></button>`).join('');
-
-function myProfile() {
-  let p = store.get('me');
-  if (!p?.nm) { p = { nm: `${pick1(NICK_A)} ${pick1(NICK_B)}`, col: pick1(PLAYER_COLORS) }; store.set('me', p); }
-  return { nm: cleanName(p.nm, 'Player'), col: cleanColor(p.col, 0) };
-}
-function setMe(patch) {
-  const me = { ...myProfile(), ...patch };
-  store.set('me', me);
-  if (NET) { pub({ nm: me.nm, col: me.col }); paintRoom(); }
-}
-function onPanelInput(e) {
-  const t = e.target;
-  if (t.matches('[data-nick]')) { const nm = cleanName(t.value, ''); if (nm) setMe({ nm }); }
-  else if (t.matches('[data-code]')) t.value = t.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  else if (t.matches('[data-lp]')) { const ps = localPlayers(); ps[+t.dataset.lp].nm = t.value.slice(0, 18); store.set('local', ps); }
-}
-
-// ── same device ──
-function localPlayers() {
-  const ps = store.get('local');
-  if (Array.isArray(ps) && ps.length >= 2) return ps.slice(0, MAX_LOCAL).map((p, k) => ({ nm: String(p?.nm ?? '').slice(0, 18), col: cleanColor(p?.col, k) }));
-  return [{ nm: 'Player 1', col: PLAYER_COLORS[0] }, { nm: 'Player 2', col: PLAYER_COLORS[1] }];
-}
-function localRows() {
-  const ps = localPlayers();
-  return ps.map((p, k) => `<div class="g-lp" style="--c:${p.col}"><span class="g-av">${k + 1}</span><input data-lp="${k}" maxlength="18" autocomplete="off" value="${A.esc(p.nm)}" aria-label="Player ${k + 1} name">${ps.length > 2 ? `<button class="btn icon ghost" data-act="lp-del" data-k="${k}" aria-label="Remove player ${k + 1}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>` : '<span></span>'}</div>`).join('')
-    + (ps.length < MAX_LOCAL ? `<button class="btn ghost g-lpadd" data-act="lp-add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add a player</button>` : '');
-}
-function startLocal(mode, timed) {
-  const players = localPlayers().map((p, k) => ({ nm: cleanName(p.nm, `Player ${k + 1}`), col: p.col, results: [], total: 0 }));
-  store.set('timed', timed);
-  const seed = newSeed();
-  S = rules({ mode, timed, seed, rounds: buildRounds(mode, seed, A.USES), i: -1, results: [], total: 0, mp: { kind: 'local', players, turn: 0 } });
-  A.setHash('play-' + mode);
-  next();
-}
-const turnPlayer = () => S.mp.players[S.mp.turn];
-function turnSplash() {
-  const P = turnPlayer();
-  return `<span class="mono">Round ${S.i + 1} of ${S.rounds.length}</span><b><span class="g-sw" style="--c:${P.col}">${A.esc(P.nm)}</span>, your turn</b>`;
-}
-function turnBanner() {
-  if (S.mp?.kind === 'local') {
-    const P = turnPlayer();
-    return `<div class="g-turn" style="--c:${P.col}"><span class="g-av">${A.esc(initial(P.nm))}</span><b>${A.esc(P.nm)}'s turn</b><span class="mono muted">Player ${S.mp.turn + 1} of ${S.mp.players.length}</span></div>`;
-  }
-  if (S.mp?.kind === 'online') return `<div class="g-turn room"><span class="g-chips" data-chips>${chipsHtml()}</span><b>Room ${A.esc(NET?.code || '')}</b><span class="mono muted" data-lockcount>${lockCount()}</span></div>`;
-  return '';
-}
-function submitLocal() {
-  const P = turnPlayer(), rec = record();
-  P.results[S.i] = rec; P.total += rec.points;
-  if (S.mp.turn + 1 < S.mp.players.length) return handoff();
-  revealAll();
-}
-// between turns: hide the last pin and cover the round until the next player is holding the device
-function handoff() {
-  S.phase = 'pass'; clearInterval(timer); clearPins(); fxItems = [];
-  vignette?.stop(); vignette = null;
-  A.play.ver++; A.refresh();
-  A.setTint(null); A.flyTo([20, Math.random() * 360 - 180], 0.9);
-  const prev = turnPlayer(), P = S.mp.players[S.mp.turn + 1];
-  gameEl.innerHTML = `
+    <div class="chest-next">${m}<span>Tomorrow: ${a.tomorrow.n} facts, ${Jt(a.tomorrow.best)}. Each day in a row adds to the set, up to a legendary on day 7; miss a day and the streak starts over.</span></div>
+    <button class="btn sheet-go" data-sheet="close">Done</button>`,"chest-sheet");const u=M.querySelector(".chest-slot"),g=d=>{const c=i[d];e.facts.mount(u,c.id,c.r,{isNew:c.isNew}),M.querySelectorAll(".chest-chip").forEach((p,f)=>{p.classList.toggle("on",f===d),p.setAttribute("aria-pressed",String(f===d))})};M.querySelectorAll(".chest-chip").forEach(d=>d.addEventListener("click",()=>g(Number(d.dataset.chest)))),g(0),r&&(T(M.querySelectorAll(".chest-chip"),{cls:"mv-pop",step:90,delay:250}),setTimeout(()=>Qe(M.querySelector(".g-chest-ico"),K[i[0].r].col,{n:26,spread:90,stars:9}),200))}function _a(){o&&(t?.kind==="scent"&&t.daily||(y&&xe(),clearInterval(x),De(!0)))}function Ns(e,s,a){if(navigator.share&&matchMedia("(hover: none)").matches){navigator.share({text:e}).catch(()=>{});return}Mt(e,s,"Copied",a)}function Ja(e){const s=e.target.closest(".g-mode");if(s){h.querySelectorAll(".g-mode").forEach(l=>l.setAttribute("aria-checked",String(l===s))),y?.host&&h.querySelector("[data-roomscreen]")&&(y.gm={...y.gm,mode:s.dataset.mode},$.set("mode",s.dataset.mode),P({gm:y.gm}));return}const a=e.target.closest("[data-who]");if(a){h.querySelectorAll("[data-who]").forEach(l=>l.setAttribute("aria-selected",String(l===a))),h.querySelectorAll("[data-whop]").forEach(l=>{l.hidden=l.dataset.whop!==a.dataset.who}),h.querySelector("[data-startlabel]").textContent=Lt[a.dataset.who].start,$.set("who",a.dataset.who);return}const r=e.target.closest("[data-col]");if(r){Os({col:r.dataset.col}),h.querySelectorAll("[data-col]").forEach(l=>l.setAttribute("aria-pressed",String(l===r)));return}const i=e.target.closest("[data-act]");if(!i)return;const n=i.dataset.act;if(n==="exit")Ee();else if(n==="collection")Ee(),o.collection?.();else if(n==="lobby")fe(t?.mode,t?.mp?t.mp.kind==="local"?"local":"online":null);else if(n==="start")la();else if(n==="scent")De(!0);else if(n==="bonus")Wa();else if(n==="games")t=null,fe();else if(n==="stats")Ua();else if(n==="scent-guess")Oe(h.querySelector("[data-sc-in]")?.value||"");else if(n==="scent-pick")Oe(i.dataset.label,i.dataset.id);else if(n==="scent-giveup")i.dataset.sure?Na():(i.dataset.sure="1",i.textContent="Tap again to reveal every note");else if(n==="scent-share")Ns(vt(),i,Hs);else if(n==="scent-fact")h.querySelectorAll(".g-sc-card").forEach(l=>l.classList.toggle("on",l===i)),t.last=t.log.find(l=>l.hit&&l.id===i.dataset.id),Fe(h.querySelector("[data-sc-fact]"),t.last);else if(n==="guess")Ie();else if(n==="next")Bt();else if(n==="again")Ys();else if(n==="turn")Nt();else if(n==="join"){const l=(h.querySelector("[data-code]")?.value||"").toUpperCase().replace(/[^A-Z0-9]/g,"");if(l.length!==4)return he("Room codes are four letters or numbers.");Ft(l,!1)}else if(n==="join-open")Ft(i.dataset.code,!1);else if(n==="leave-room")xe(),fe(null,"online");else if(n==="start-room")wn();else if(n==="to-room")kn();else if(n==="copy-code")Mt(y?.code||"",i,"Copied");else if(n==="lp-add"){const l=Me();if(l.length<At){const m=new Set(l.map(u=>u.col));l.push({nm:`Player ${l.length+1}`,col:se.find(u=>!m.has(u))}),$.set("local",l),h.querySelector("[data-local]").innerHTML=qt(),h.querySelector(`[data-lp="${l.length-1}"]`)?.focus()}}else if(n==="lp-del"){const l=Me();l.splice(+i.dataset.k,1),$.set("local",l),h.querySelector("[data-local]").innerHTML=qt()}else if(n==="clue"){if(t.phase!=="guess"||+i.dataset.k!==t.clues)return;t.clues++;const l=h.querySelectorAll(".g-clue");l[t.clues-1].classList.add("open"),l[t.clues-1].querySelector(".mono").textContent="revealed",l[t.clues]?.querySelector("button").removeAttribute("disabled");const m=h.querySelector(".g-max b");m.textContent=ns(),m.classList.remove("dip"),m.offsetWidth,m.classList.add("dip")}else if(n==="share"){const l=t.mp?Ws():cs(is.find(([m])=>t.total>=m*(t.rounds.length*A/25e3))[1]);Mt(l,i,"Copied",Hs)}}function Mt(e,s,a,r){const i=s.lastChild,n=i.textContent,l=()=>{i.textContent=a,setTimeout(()=>{s.isConnected&&(i.textContent=n)},1600)},m=navigator.clipboard?.writeText(e);m?m.then(l,()=>r?.()):r?.()}function Hs(){const e=h.querySelector("#g-sharetext");if(!e)return;e.parentElement.hidden=!1;const s=document.createRange();s.selectNodeContents(e);const a=getSelection();a.removeAllRanges(),a.addRange(s)}function Za(e){if(e.key==="Escape"){t?.bonus||t&&t.kind!=="scent"&&t.phase!=="done"?fe(t.mode):Ee();return}e.key!=="Enter"&&e.key!==" "||e.target.closest?.("button, input")||(t?.phase==="guess"&&t.guess?(e.preventDefault(),Ie()):t?.phase==="reveal"?(e.preventDefault(),Bt()):t?.phase==="pass"&&(e.preventDefault(),Nt()))}function Qa(){t?.phase==="guess"?Ie():t?.phase==="reveal"?Bt():t?.phase==="pass"?Nt():t?.phase==="done"&&Ys()}const xt=e=>{const s=parseInt(e.slice(1),16);return[(s>>16&255)/255,(s>>8&255)/255,(s&255)/255]};function Xa(){if(!t)return[];if(t.kind==="scent")return t.notes.filter(r=>r.id&&(t.found.has(r.id)||t.phase==="done")).map(r=>{const i=o.ING[r.id],n=t.found.has(r.id);return{location:i.loc,size:n?.026:.014,color:n?xt(o.ingHex(i)):o.isDark()?[.45,.45,.5]:[.6,.6,.64]}});const e=o.isDark()?[1,1,1]:[.09,.09,.11],s=[],a=t.phase==="done"?t.results:t.phase==="reveal"?[t.results[t.i]]:[];for(const r of a)(r.arrived||t.phase==="done")&&s.push({location:r.ing.loc,size:.024,color:xt(o.ingHex(r.ing))}),r.guess&&s.push({location:r.guess,size:.016,color:e});if(t.phase==="guess"&&t.guess&&s.push({location:t.guess,size:.016,color:e}),t.mp&&t.phase==="reveal"&&t.results[t.i]?.arrived)for(const r of G()){const i=r.results[t.i];!r.me&&i?.guess&&s.push({location:i.guess,size:.014,color:xt(r.col)})}return s}function en(){return[]}function Es(e){const s=Je[t.f.house];B([...s?[{loc:s,kind:"guess",small:!e,text:t.f.house,col:o.fragHex(t.f)}]:[],...t.log.filter(a=>a.hit).map(a=>{const r=o.ING[a.id],i=a.id===e;return{loc:r.loc,kind:"answer",ing:r,small:!i,text:i?r.name:"",pop:i}})])}function js(e){const s=Je[t.f.house];if(!s)return;const a=performance.now();w=w.filter(r=>!r.link),t.log.filter(r=>r.hit).forEach((r,i)=>{const n=o.ING[r.id];w.push({type:"arc",link:!0,flow:!0,from:n.loc,to:s,t0:r.id===e?a+1250:a-2e3,dur:1100,color:o.ingHex(n),keep:!0,phase:i*.37%1})})}function F(){for(const e of He)e.el.remove();He=[]}function B(e){F();for(const s of e){const a=document.createElement("div");a.className=`g-pin ${s.kind}${s.small?" small":""}${s.missed?" missed":""}${s.pop?" pop":""}`,s.ing&&a.style.setProperty("--pin",s.missed?o.isDark()?"#6f6760":"#b3aaa0":o.ingHex(s.ing)),s.delay&&a.style.setProperty("--d",`${s.delay}ms`),s.col&&(a.style.setProperty("--pin-lo",s.col),a.style.setProperty("--pin-hi",o.mix(s.col,"#ffffff",.3)));const r=`gpg${++ra}`;a.innerHTML=s.kind==="guess"?`<i class="g-gs"></i><svg viewBox="0 0 24 32" aria-hidden="true"><defs><linearGradient id="${r}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--pin-hi)"/><stop offset="1" stop-color="var(--pin-lo)"/></linearGradient></defs><path d="M12 31s10-11 10-19A10 10 0 0 0 2 12c0 8 10 19 10 19z" fill="url(#${r})"/><circle cx="12" cy="12" r="4.2"/></svg>${s.text?`<span>${o.esc(s.text)}</span>`:""}`:`<i></i><i></i><b></b>${s.text?`<span>${o.esc(s.text)}</span>`:""}`,o.els.labels.appendChild(a),He.push({el:a,loc:s.loc})}}function tn(){for(const e of He){const s=o.project(e.loc);e.el.style.transform=`translate(${s.x}px, ${s.y}px)`,e.el.classList.toggle("hidden",!s.front||s.z<-.05)}}const sn=matchMedia("(prefers-reduced-motion: reduce)"),de=e=>1-Math.pow(1-e,3),Ye=([e,s])=>{const a=e*Math.PI/180,r=s*Math.PI/180;return[Math.cos(a)*Math.cos(r),Math.cos(a)*Math.sin(r),Math.sin(a)]},Is=([e,s,a])=>[Math.asin(Math.max(-1,Math.min(1,a)))*180/Math.PI,Math.atan2(s,e)*180/Math.PI];function Ps(e,s,a,r){if(r<1e-6)return e;const i=Math.sin(r),n=Math.sin((1-a)*r)/i,l=Math.sin(a*r)/i;return[e[0]*n+s[0]*l,e[1]*n+s[1]*l,e[2]*n+s[2]*l]}function Ct(e){return Array.from({length:e},(s,a)=>{const r=a/e*Math.PI*2+Math.random()*.4,i=60+Math.random()*110;return{vx:Math.cos(r)*i,vy:Math.sin(r)*i-40,r:1.2+Math.random()*2}})}function ke(){return Array.from({length:120},()=>({x:Math.random(),y:-.1-Math.random()*.3,vy:.25+Math.random()*.35,sway:Math.random()*6,rot:Math.random()*6,vr:(Math.random()-.5)*10,w:5+Math.random()*5,h:3+Math.random()*4,c:Math.floor(Math.random()*8)}))}let Bs=!0;function an(){if(tn(),!I)return;const e=t?.phase==="guess"&&ee&&!matchMedia("(hover: none)").matches;if(!w.length&&!e&&!Bs)return;Bs=w.length>0||e;const s=o.els.stage,a=s.clientWidth,r=s.clientHeight,i=Math.min(2,devicePixelRatio||1);(I.width!==Math.round(a*i)||I.height!==Math.round(r*i))&&(I.width=Math.round(a*i),I.height=Math.round(r*i));const n=st;n.setTransform(i,0,0,i,0,0),n.clearRect(0,0,a,r);const l=performance.now(),m=sn.matches,u=w;if(w=[],w=u.filter(d=>{const c=l-d.t0;if(c<0)return!0;switch(d.type){case"arc":{const p=m?1:Math.min(1,c/d.dur),f=de(p),b=Ye(d.from),v=Ye(d.to),k=Math.acos(Math.max(-1,Math.min(1,b[0]*v[0]+b[1]*v[1]+b[2]*v[2]))),N=Math.min(.1,k*.07),Y=48,Vt=E=>o.project(Is(Ps(b,v,E,k)),.01+Math.sin(Math.PI*E)*N);n.lineWidth=d.faint?1.2:d.flow?1.8:2,n.lineCap="round",n.strokeStyle=d.color,n.setLineDash(d.faint?[2,5]:[]),n.shadowColor=d.color,n.shadowBlur=d.faint?0:8,n.globalAlpha=d.flow&&p>=1?.7:1,n.beginPath();let _e=!1,ae=null;for(let E=0;E<=Y;E++){const Z=E/Y*f,ne=Vt(Z);if(!ne.front){_e=!1;continue}_e?n.lineTo(ne.x,ne.y):n.moveTo(ne.x,ne.y),_e=!0,ae=ne}if(n.stroke(),n.shadowBlur=0,n.globalAlpha=1,n.setLineDash([]),d.flow&&p>=1&&!m){const E=(l/2600+(d.phase||0))%1,Z=Vt(E);Z.front&&(n.globalAlpha=Math.min(1,Math.sin(Math.PI*E)*1.6),n.fillStyle=d.color,n.shadowColor=d.color,n.shadowBlur=12,n.beginPath(),n.arc(Z.x,Z.y,3.2,0,7),n.fill(),n.shadowBlur=0,n.fillStyle="rgba(255,255,255,.85)",n.beginPath(),n.arc(Z.x,Z.y,1.3,0,7),n.fill(),n.globalAlpha=1)}if(ae&&p<1&&(n.fillStyle=d.color,n.beginPath(),n.arc(ae.x,ae.y,4,0,7),n.fill(),n.fillStyle="rgba(255,255,255,.9)",n.beginPath(),n.arc(ae.x,ae.y,1.6,0,7),n.fill()),p>=1&&d.done){const E=d.done;d.done=null,E()}return p<1||d.keep}case"ripple":{const p=c/900;if(p>=1||m)return!1;const f=o.project(d.loc);if(!f.front)return!0;for(const b of[0,.25]){const v=p-b;v<=0||(n.globalAlpha=(1-v)*.8,n.strokeStyle=d.color,n.lineWidth=2*(1-v)+.5,n.beginPath(),n.arc(f.x,f.y,6+de(v)*34,0,7),n.stroke())}return n.globalAlpha=1,!0}case"burst":{const p=c/1100;if(p>=1||m)return!1;const f=o.project(d.loc);if(!f.front)return!0;const b=c/1e3;n.fillStyle=d.color;for(const v of d.parts)n.globalAlpha=1-p,n.beginPath(),n.arc(f.x+v.vx*b*(1-b*.4),f.y+v.vy*b+160*b*b,v.r*(1-p*.5),0,7),n.fill();return n.globalAlpha=1-p,n.strokeStyle=d.color,n.lineWidth=2,n.beginPath(),n.arc(f.x,f.y,10+de(Math.min(1,p*1.6))*46,0,7),n.stroke(),n.globalAlpha=1,!0}case"float":{const p=c/1500;if(p>=1)return!1;const f=o.project(d.loc);if(!f.front)return!0;const b=f.y-26-de(p)*34;return n.globalAlpha=p<.15?p/.15:p>.7?(1-p)/.3:1,n.font="600 15px Inter, system-ui, sans-serif",n.textAlign="center",n.textBaseline="middle",n.lineWidth=4,n.strokeStyle=o.isDark()?"rgba(9,9,11,.85)":"rgba(255,255,255,.92)",n.strokeText(d.text,f.x,b),n.fillStyle=d.color,n.fillText(d.text,f.x,b),n.globalAlpha=1,!0}case"label":{const p=Math.min(1,c/450);if(t?.phase!=="reveal"&&t?.phase!=="done")return!1;const f=Ye(d.from),b=Ye(d.to),v=Math.acos(Math.max(-1,Math.min(1,f[0]*b[0]+f[1]*b[1]+f[2]*b[2]))),k=o.project(Is(Ps(f,b,.5,v)),.01+Math.min(.1,v*.07));if(!k.front)return!0;n.font="600 12px ui-monospace, SFMono-Regular, Menlo, monospace",n.textAlign="center",n.textBaseline="middle";const N=n.measureText(d.text).width+18,Y=k.y-4-(1-de(p))*8;return n.globalAlpha=de(p),n.fillStyle=d.color,n.shadowColor="rgba(0,0,0,.25)",n.shadowBlur=8,n.shadowOffsetY=2,n.beginPath(),n.roundRect(k.x-N/2,Y-11,N,22,11),n.fill(),n.shadowBlur=0,n.shadowOffsetY=0,n.fillStyle="#fff",n.fillText(d.text,k.x,Y+.5),n.globalAlpha=1,!0}case"confetti":{const p=c/2600;if(p>=1||m)return!1;const f=c/1e3;n.globalAlpha=p>.75?(1-p)/.25:1;for(const b of d.parts){const v=(b.x+Math.sin(f*2+b.sway)*.02)*a,k=(b.y+b.vy*f+.12*f*f)*r;n.save(),n.translate(v,k),n.rotate(b.rot+b.vr*f),n.scale(1,Math.cos(f*6+b.sway)),n.fillStyle=d.colors[b.c%d.colors.length],n.fillRect(-b.w/2,-b.h/2,b.w,b.h),n.restore()}return n.globalAlpha=1,!0}}return!1}).concat(w),t?.phase==="guess"&&ee&&!matchMedia("(hover: none)").matches){const d=o.unproject(ee[0],ee[1]);if(d){const[c,p]=ee,f=14+Math.sin(l/260)*1.5;n.strokeStyle=O,n.lineWidth=1.5,n.setLineDash([4,4]),n.lineDashOffset=-l/60,n.beginPath(),n.arc(c,p,f,0,7),n.stroke(),n.setLineDash([]),n.beginPath(),n.moveTo(c-f-6,p),n.lineTo(c-f+4,p),n.moveTo(c+f-4,p),n.lineTo(c+f+6,p),n.moveTo(c,p-f-6),n.lineTo(c,p-f+4),n.moveTo(c,p+f-4),n.lineTo(c,p+f+6),n.stroke();const b=`${Math.abs(d[0]).toFixed(1)}°${d[0]>=0?"N":"S"}  ${Math.abs(d[1]).toFixed(1)}°${d[1]>=0?"E":"W"}`;n.font="500 11px ui-monospace, SFMono-Regular, Menlo, monospace",n.textAlign="left",n.textBaseline="middle";const v=n.measureText(b).width,k=c+f+10,N=p+f+4;n.fillStyle=o.isDark()?"rgba(24,24,27,.86)":"rgba(255,255,255,.9)",n.beginPath(),n.roundRect(k-6,N-10,v+12,20,6),n.fill(),n.fillStyle=o.isDark()?"#e7e0d6":"#4a413a",n.fillText(b,k,N)}}}const Lt={solo:{label:"Solo",start:`Start ${et} rounds`,icon:'<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>'},online:{label:"Online room",start:"Create a room",icon:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>'},local:{label:"Same device",start:"Start pass and play",icon:'<rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M11 18h2"/>'}},se=["#c4513f","#0090ff","#4f8f63","#8e4ec6","#f76b15","#12a594","#d6409f","#e2a336"],nn=["Amber","Neroli","Vetiver","Iris","Oud","Musk","Cedar","Saffron","Jasmine","Tonka","Vanilla","Bergamot","Myrrh","Mimosa"],on=["Fox","Otter","Heron","Lynx","Moth","Wren","Hare","Finch","Koi","Ibis","Gecko","Owl","Bee","Seal"],rn="ABCDEFGHJKLMNPQRSTUVWXYZ23456789",At=4,Rs=/^[A-Z0-9]{4}$/,zs=["🥇","🥈","🥉"],Se=(e,s)=>String(e??"").replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g,"").trim().slice(0,18)||s,We=(e,s)=>/^#[0-9a-f]{6}$/i.test(e)?e:se[s%se.length],J=e=>[...e.trim()][0]?.toUpperCase()||"?",Ke=e=>e[Math.floor(Math.random()*e.length)],Ve=()=>Math.random().toString(36).slice(2,10),Tt=()=>Math.random()*2**32>>>0,Ds=e=>se.map(s=>`<button class="g-col" data-col="${s}" style="--c:${s}" aria-pressed="${s===e}" aria-label="Colour ${s}"></button>`).join("");function ue(){let e=$.get("me");return e?.nm||(e={nm:`${Ke(nn)} ${Ke(on)}`,col:Ke(se)},$.set("me",e)),{nm:Se(e.nm,"Player"),col:We(e.col,0)}}function Os(e){const s={...ue(),...e};$.set("me",s),y&&(P({nm:s.nm,col:s.col}),Kt())}function ln(e){const s=e.target;if(s.matches("[data-nick]")){const a=Se(s.value,"");a&&Os({nm:a})}else if(s.matches("[data-code]"))s.value=s.value.toUpperCase().replace(/[^A-Z0-9]/g,"");else if(s.matches("[data-lp]")){const a=Me();a[+s.dataset.lp].nm=s.value.slice(0,18),$.set("local",a)}}function Me(){const e=$.get("local");return Array.isArray(e)&&e.length>=2?e.slice(0,At).map((s,a)=>({nm:String(s?.nm??"").slice(0,18),col:We(s?.col,a)})):[{nm:"Player 1",col:se[0]},{nm:"Player 2",col:se[1]}]}function qt(){const e=Me();return e.map((s,a)=>`<div class="g-lp" style="--c:${s.col}"><span class="g-av">${a+1}</span><input data-lp="${a}" maxlength="18" autocomplete="off" value="${o.esc(s.nm)}" aria-label="Player ${a+1} name">${e.length>2?`<button class="btn icon ghost" data-act="lp-del" data-k="${a}" aria-label="Remove player ${a+1}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>`:"<span></span>"}</div>`).join("")+(e.length<At?'<button class="btn ghost g-lpadd" data-act="lp-add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Add a player</button>':"")}function Fs(e,s){const a=Me().map((i,n)=>({nm:Se(i.nm,`Player ${n+1}`),col:i.col,results:[],total:0}));$.set("timed",s);const r=Tt();t=ge({mode:e,timed:s,seed:r,rounds:Ne(e,r,o.USES),i:-1,results:[],total:0,mp:{kind:"local",players:a,turn:0}}),o.setHash("play-"+e),re()}const pe=()=>t.mp.players[t.mp.turn];function Gs(){const e=pe();return`<span class="mono">Round ${t.i+1} of ${t.rounds.length}</span><b><span class="g-sw" style="--c:${e.col}">${o.esc(e.nm)}</span>, your turn</b>`}function cn(){if(t.mp?.kind==="local"){const e=pe();return`<div class="g-turn" style="--c:${e.col}"><span class="g-av">${o.esc(J(e.nm))}</span><b>${o.esc(e.nm)}'s turn</b><span class="mono muted">Player ${t.mp.turn+1} of ${t.mp.players.length}</span></div>`}return t.mp?.kind==="online"?`<div class="g-turn room"><span class="g-chips" data-chips>${jt()}</span><b>Room ${o.esc(y?.code||"")}</b><span class="mono muted" data-lockcount>${Et()}</span></div>`:""}function dn(){const e=pe(),s=je();if(e.results[t.i]=s,e.total+=s.points,t.mp.turn+1<t.mp.players.length)return un();pn()}function un(){t.phase="pass",clearInterval(x),F(),w=[],C?.stop(),C=null,o.play.ver++,o.refresh(),o.setTint(null),o.flyTo([20,Math.random()*360-180],.9);const e=pe(),s=t.mp.players[t.mp.turn+1];h.innerHTML=`
     <div class="game">
       <div class="detail-top"><button class="btn icon ghost" data-act="lobby" aria-label="Quit to game menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-        <div class="crumbs"><span>Fraguessr</span><span>/</span><b>Round ${S.i + 1} of ${S.rounds.length}</b></div></div>
-      <div class="g-pass" style="--c:${P.col}">
-        <span class="g-av big">${A.esc(initial(P.nm))}</span>
-        <span class="mono muted">Round ${S.i + 1} · player ${S.mp.turn + 2} of ${S.mp.players.length}</span>
-        <h2 class="title">Pass to ${A.esc(P.nm)}</h2>
-        <p class="prose">${A.esc(prev.nm)} has locked in a guess. No peeking: hand over the device, then start your turn.</p>
-        <button class="btn" data-act="turn">I'm ${A.esc(P.nm)}, show my round</button>
-        <div class="g-passlist">${S.mp.players.map((q, k) => `<span class="${k <= S.mp.turn ? 'on' : ''}" style="--c:${q.col}"><i>${A.esc(initial(q.nm))}</i>${A.esc(q.nm)}</span>`).join('')}</div>
+        <div class="crumbs"><span>Fraguessr</span><span>/</span><b>Round ${t.i+1} of ${t.rounds.length}</b></div></div>
+      <div class="g-pass" style="--c:${s.col}">
+        <span class="g-av big">${o.esc(J(s.nm))}</span>
+        <span class="mono muted">Round ${t.i+1} · player ${t.mp.turn+2} of ${t.mp.players.length}</span>
+        <h2 class="title">Pass to ${o.esc(s.nm)}</h2>
+        <p class="prose">${o.esc(e.nm)} has locked in a guess. No peeking: hand over the device, then start your turn.</p>
+        <button class="btn" data-act="turn">I'm ${o.esc(s.nm)}, show my round</button>
+        <div class="g-passlist">${t.mp.players.map((a,r)=>`<span class="${r<=t.mp.turn?"on":""}" style="--c:${a.col}"><i>${o.esc(J(a.nm))}</i>${o.esc(a.nm)}</span>`).join("")}</div>
       </div>
-    </div>`;
-  enter(gameEl.querySelector('.g-pass'));
-  renderHud();
-}
-function beginTurn() {
-  if (S?.phase !== 'pass') return;
-  S.mp.turn++; S.phase = 'guess'; S.guess = null; S.clues = S.free; S.left = S.time;
-  const R = S.rounds[S.i];
-  A.play.ver++; A.refresh();
-  A.setTint(A.ingHex(R.ing), R.ing.c);
-  A.flyTo([20 + (Math.random() - 0.5) * 30, R.ing.loc[1] + 70 + Math.random() * 140], 1);
-  renderRound(); renderHud(); showSplash(turnSplash()); startClock();
-}
-// everyone has guessed: fly every player's pin to the answer at once
-function revealAll() {
-  S.phase = 'reveal'; clearInterval(timer);
-  const R = S.rounds[S.i], ing = R.ing, ps = S.mp.players, color = A.ingHex(ing);
-  const best = ps.reduce((a, p) => (p.results[S.i].points > a.results[S.i].points ? p : a), ps[0]);
-  const res = { ing, frag: R.frag, guess: null, km: null, points: best.results[S.i].points, arrived: false };
-  S.results[S.i] = res;
-  A.play.ver++; A.refresh();
-  clearPins(); fxItems = [];
-  const now = performance.now(), guessed = ps.filter((p) => p.results[S.i].guess);
-  const arrive = () => {
-    if (S?.results[S.i] !== res) return;
-    const t = performance.now();
-    res.arrived = true; A.play.ver++; A.refresh();
-    setPins(revealPins(true));
-    for (const p of guessed) fxItems.push({ type: 'label', from: p.results[S.i].guess, to: ing.loc, t0: t, text: kmText(p.results[S.i].km), color: p.col });
-    fxItems.push({ type: 'burst', loc: ing.loc, t0: t, color, parts: sparks(28) });
-    fxItems.push({ type: 'float', loc: ing.loc, t0: t, text: `${best.nm} +${res.points.toLocaleString()}`, color: best.col });
-    if (res.points >= 4500) fxItems.push({ type: 'confetti', t0: t, parts: confetti(), colors: [best.col, color, ...ing.c, accent] });
-  };
-  setPins(guessed.map((p) => ({ loc: p.results[S.i].guess, kind: 'guess', small: true, col: p.col, text: p.nm })));
-  let longest = 0;
-  guessed.forEach((p, k) => {
-    const km = p.results[S.i].km, dur = Math.min(1700, 700 + km / 12);
-    longest = Math.max(longest, k * 220 + dur);
-    fxItems.push({ type: 'arc', from: p.results[S.i].guess, to: ing.loc, t0: now + 450 + k * 220, dur, color: p.col, keep: true });
-  });
-  setTimeout(arrive, guessed.length ? 450 + longest : 600);
-  const far = Math.max(0, ...guessed.map((p) => p.results[S.i].km));
-  A.flyTo(guessed.length ? A.midpoint([...guessed.map((p) => p.results[S.i].guess), ing.loc]) : ing.loc, far < 1200 ? 2.1 : far < 3000 ? 1.5 : far < 7000 ? 1.1 : 0.9);
-  const lead = ps.slice().sort((a, b) => b.total - a.total)[0];
-  const body = gameEl.querySelector('.body');
-  body.innerHTML = `
-    <div class="g-board" data-board>${boardHtml()}</div>
-    ${ingInfo(ing)}
-    <div class="g-cta"><div class="g-max mono">Leading <b>${A.esc(lead.nm)}</b> ${lead.total.toLocaleString()}</div>${nextBtn()}</div>`;
-  gameEl.querySelector('.g-q')?.remove();
-  gameEl.querySelector('.g-turn')?.remove();
-  gameEl.querySelector('.g-total').textContent = `${lead.nm} leads · ${lead.total.toLocaleString()}`;
-  const st = gameEl.querySelectorAll('.g-steps i')[S.i]; st?.classList.add('done'); st?.style.setProperty('--q', Math.min(1, res.points / MAX));
-  const tag = gameEl.querySelector('#g-hero .tag'); if (tag) tag.textContent = `${ing.place}, ${ing.country}`;
-  gameEl.querySelectorAll('.g-brow').forEach((el, k) => el.style.setProperty('--i', k));
-  gameTop();
-  renderHud();
-}
-
-// ── who's in the game, whichever way it is played ──
-// { nm, col, me, peer, results: [per round], total }
-function roster() {
-  if (!S?.mp) return [];
-  if (S.mp.kind === 'local') return S.mp.players.map((p) => ({ ...p, me: false, peer: p.nm }));
-  return players().map((p) => {
-    const results = p.me ? S.results : theirResults(p);
-    return { nm: p.nm, col: p.col, me: p.me, peer: p.peer, h: p.h, results, total: results.reduce((a, r) => a + (r?.points || 0), 0) };
-  });
-}
-const lockedNow = (p) => !!p.results[S.i];
-function lockCount() { const r = roster(); return `${r.filter(lockedNow).length} of ${r.length} locked in`; }
-function chipsHtml() {
-  return roster().map((p) => `<i class="${lockedNow(p) ? 'on' : ''}" style="--c:${p.col}" title="${A.esc(p.nm)}">${A.esc(initial(p.nm))}</i>`).join('');
-}
-function boardHtml() {
-  const local = S.mp.kind === 'local';
-  const rows = roster().map((p) => ({ ...p, cur: p.results[S.i] })).sort((a, b) => (b.cur ? b.cur.points : -1) - (a.cur ? a.cur.points : -1) || b.total - a.total);
-  return `<div class="section-h"><span>${local ? 'This round' : 'The room this round'}</span>${local ? '' : `<span class="mono">${lockCount()}</span>`}</div>
-    <div class="g-brd">${rows.map((p, k) => `<div class="g-brow${p.cur ? '' : ' wait'}${p.me ? ' me' : ''}" style="--c:${p.col};--p:${p.cur ? Math.min(1, p.cur.points / MAX) : 0};--i:${k}">
-      <span class="g-av">${p.cur && k < 3 && p.cur.points > 0 ? MEDALS[k] : A.esc(initial(p.nm))}</span>
-      <span class="g-bn">${A.esc(p.nm)}${p.me ? ' <em>you</em>' : ''}<span class="mono muted">${p.cur ? (p.cur.km == null ? 'no pin' : `${kmText(p.cur.km)}${p.cur.clues ? ` · ${p.cur.clues} hint${p.cur.clues > 1 ? 's' : ''}` : ''}`) : 'still guessing'}</span></span>
-      <span class="g-bp mono">${p.cur ? `+${p.cur.points.toLocaleString()}` : '<span class="g-wd"><i></i><i></i><i></i></span>'}</span>
-      <span class="g-bt mono">${p.total.toLocaleString()}</span><i class="g-rb"></i></div>`).join('')}</div>`;
-}
-// who may move the game on, and what the button says
-function nextState() {
-  const last = S.i + 1 >= S.rounds.length, label = last ? 'See results' : 'Next round';
-  if (S.mp?.kind !== 'online') return { ok: true, label };
-  if (!NET?.host) return { ok: false, label: `Waiting for ${NET?.hostName || 'the host'}` };
-  const r = roster(), n = r.filter(lockedNow).length;
-  return { ok: true, label: n < r.length ? `${label} · ${n}/${r.length} in` : label };
-}
-function nextBtn() {
-  const nb = nextState();
-  return `<button class="btn primary" data-act="next" ${nb.ok ? '' : 'disabled'}><span>${A.esc(nb.label)}</span>${nb.ok ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg>' : ''}</button>`;
-}
-function advance() {
-  if (S?.mp?.kind !== 'online') return next();
-  if (!NET?.host) return;
-  const gm = NET.gm;
-  NET.gm = S.i + 1 < S.rounds.length ? { ...gm, n: S.i + 1 } : { ...gm, ph: 'done' };
-  pub({ gm: NET.gm }); onNet();
-}
-function playAgain() {
-  if (S?.bonus) return lobby();
-  if (S?.mp?.kind === 'online') { if (NET?.host) { NET.gm = { id: newId(), mode: NET.gm.mode, seed: newSeed(), n: 0, ph: 'play' }; pub({ gm: NET.gm }); onNet(); } return; }
-  if (S?.mp?.kind === 'local') return startLocal(S.mode, S.timed);
-  again();
-}
-function revealPins(pop) {
-  const R = S.rounds[S.i], mine = S.results[S.i], list = [];
-  if (!S.mp?.kind || S.mp.kind === 'online') if (mine?.guess) list.push({ loc: mine.guess, kind: 'guess', text: S.mp ? 'You' : 'Your guess' });
-  if (S.mp) for (const p of roster()) { const r = p.results[S.i]; if (!p.me && r?.guess) list.push({ loc: r.guess, kind: 'guess', small: true, col: p.col, text: p.nm }); }
-  list.push({ loc: R.ing.loc, kind: 'answer', ing: R.ing, text: R.ing.name, pop });
-  return list;
-}
-const othersKey = () => roster().filter((p) => !p.me && p.results[S.i]?.guess).map((p) => p.peer).join(',');
-
-function mpShareText() {
-  const ranked = roster().sort((a, b) => b.total - a.total);
-  return `Fraguessr · ${MODES[S.mode].label} · ${ranked.length} players\n${ranked.map((p, k) => `${MEDALS[k] || `${k + 1}.`} ${p.nm} ${p.total.toLocaleString()} ${S.rounds.map((_, i) => square(p.results[i]?.points || 0)).join('')}`).join('\n')}`;
-}
-function standings() {
-  S.phase = 'done'; clearInterval(timer);
-  vignette?.stop(); vignette = null;
-  A.setTint(null);
-  const online = S.mp.kind === 'online', max = S.rounds.length * MAX;
-  const ranked = roster().sort((a, b) => b.total - a.total), win = ranked[0];
-  const tie = ranked.length > 1 && ranked[1].total === win.total;
-  setPins(S.rounds.map((R) => ({ loc: R.ing.loc, kind: 'answer', ing: R.ing, text: R.ing.name })));
-  fxItems = []; const t0 = performance.now() + 500;
-  fxItems.push({ type: 'confetti', t0, parts: confetti(), colors: [win.col, accent, '#4f8f63', '#e2a336', '#8e4ec6'] });
-  showSplash(`<span class="mono">${tie ? 'Final scores' : 'Winner'}</span><b>${tie ? "It's a tie" : `<span class="g-sw" style="--c:${win.col}">${A.esc(win.nm)}</span>`}</b>`);
-  A.play.ver++; A.refresh();
-  A.flyTo(A.midpoint(S.rounds.map((R) => R.ing.loc)), 0.95);
-  hud.innerHTML = `<span class="mono muted">${online ? `Room ${A.esc(NET?.code || '')}` : 'Pass and play'}</span><span class="g-hq">${tie ? 'A tie at' : `<b>${A.esc(win.nm)}</b> wins with`} ${win.total.toLocaleString()}</span>`;
-  const host = !online || NET?.host;
-  fab.textContent = host ? 'Play again' : `Waiting for ${NET?.hostName || 'the host'}`; fab.disabled = !host; fab.classList.toggle('ready', host);
-  const pod = [ranked[1], ranked[0], ranked[2]];
-  gameEl.innerHTML = `
+    </div>`,q(h.querySelector(".g-pass")),_()}function Nt(){if(t?.phase!=="pass")return;t.mp.turn++,t.phase="guess",t.guess=null,t.clues=t.free,t.left=t.time;const e=t.rounds[t.i];o.play.ver++,o.refresh(),o.setTint(o.ingHex(e.ing),e.ing.c),o.flyTo([20+(Math.random()-.5)*30,e.ing.loc[1]+70+Math.random()*140],1),os(),_(),ie(Gs()),as()}function pn(){t.phase="reveal",clearInterval(x);const e=t.rounds[t.i],s=e.ing,a=t.mp.players,r=o.ingHex(s),i=a.reduce((v,k)=>k.results[t.i].points>v.results[t.i].points?k:v,a[0]),n={ing:s,frag:e.frag,guess:null,km:null,points:i.results[t.i].points,arrived:!1};t.results[t.i]=n,o.play.ver++,o.refresh(),F(),w=[];const l=performance.now(),m=a.filter(v=>v.results[t.i].guess),u=()=>{if(t?.results[t.i]!==n)return;const v=performance.now();n.arrived=!0,o.play.ver++,o.refresh(),B(Rt(!0));for(const k of m)w.push({type:"label",from:k.results[t.i].guess,to:s.loc,t0:v,text:oe(k.results[t.i].km),color:k.col});w.push({type:"burst",loc:s.loc,t0:v,color:r,parts:Ct(28)}),w.push({type:"float",loc:s.loc,t0:v,text:`${i.nm} +${n.points.toLocaleString()}`,color:i.col}),n.points>=4500&&w.push({type:"confetti",t0:v,parts:ke(),colors:[i.col,r,...s.c,O]})};B(m.map(v=>({loc:v.results[t.i].guess,kind:"guess",small:!0,col:v.col,text:v.nm})));let g=0;m.forEach((v,k)=>{const N=v.results[t.i].km,Y=Math.min(1700,700+N/12);g=Math.max(g,k*220+Y),w.push({type:"arc",from:v.results[t.i].guess,to:s.loc,t0:l+450+k*220,dur:Y,color:v.col,keep:!0})}),setTimeout(u,m.length?450+g:600);const d=Math.max(0,...m.map(v=>v.results[t.i].km));o.flyTo(m.length?o.midpoint([...m.map(v=>v.results[t.i].guess),s.loc]):s.loc,d<1200?2.1:d<3e3?1.5:d<7e3?1.1:.9);const c=a.slice().sort((v,k)=>k.total-v.total)[0],p=h.querySelector(".body");p.innerHTML=`
+    <div class="g-board" data-board>${It()}</div>
+    ${rs(s)}
+    <div class="g-cta"><div class="g-max mono">Leading <b>${o.esc(c.nm)}</b> ${c.total.toLocaleString()}</div>${Us()}</div>`,h.querySelector(".g-q")?.remove(),h.querySelector(".g-turn")?.remove(),h.querySelector(".g-total").textContent=`${c.nm} leads · ${c.total.toLocaleString()}`;const f=h.querySelectorAll(".g-steps i")[t.i];f?.classList.add("done"),f?.style.setProperty("--q",Math.min(1,n.points/A));const b=h.querySelector("#g-hero .tag");b&&(b.textContent=`${s.place}, ${s.country}`),h.querySelectorAll(".g-brow").forEach((v,k)=>v.style.setProperty("--i",k)),V(),_()}function G(){return t?.mp?t.mp.kind==="local"?t.mp.players.map(e=>({...e,me:!1,peer:e.nm})):Gt().map(e=>{const s=e.me?t.results:vn(e);return{nm:e.nm,col:e.col,me:e.me,peer:e.peer,h:e.h,results:s,total:s.reduce((a,r)=>a+(r?.points||0),0)}}):[]}const Ht=e=>!!e.results[t.i];function Et(){const e=G();return`${e.filter(Ht).length} of ${e.length} locked in`}function jt(){return G().map(e=>`<i class="${Ht(e)?"on":""}" style="--c:${e.col}" title="${o.esc(e.nm)}">${o.esc(J(e.nm))}</i>`).join("")}function It(){const e=t.mp.kind==="local",s=G().map(a=>({...a,cur:a.results[t.i]})).sort((a,r)=>(r.cur?r.cur.points:-1)-(a.cur?a.cur.points:-1)||r.total-a.total);return`<div class="section-h"><span>${e?"This round":"The room this round"}</span>${e?"":`<span class="mono">${Et()}</span>`}</div>
+    <div class="g-brd">${s.map((a,r)=>`<div class="g-brow${a.cur?"":" wait"}${a.me?" me":""}" style="--c:${a.col};--p:${a.cur?Math.min(1,a.cur.points/A):0};--i:${r}">
+      <span class="g-av">${a.cur&&r<3&&a.cur.points>0?zs[r]:o.esc(J(a.nm))}</span>
+      <span class="g-bn">${o.esc(a.nm)}${a.me?" <em>you</em>":""}<span class="mono muted">${a.cur?a.cur.km==null?"no pin":`${oe(a.cur.km)}${a.cur.clues?` · ${a.cur.clues} hint${a.cur.clues>1?"s":""}`:""}`:"still guessing"}</span></span>
+      <span class="g-bp mono">${a.cur?`+${a.cur.points.toLocaleString()}`:'<span class="g-wd"><i></i><i></i><i></i></span>'}</span>
+      <span class="g-bt mono">${a.total.toLocaleString()}</span><i class="g-rb"></i></div>`).join("")}</div>`}function Pt(){const e=t.i+1>=t.rounds.length,s=e?"See results":"Next round";if(t.mp?.kind!=="online")return{ok:!0,label:s};if(!y?.host)return{ok:!1,label:`Waiting for ${y?.hostName||"the host"}`};const a=G(),r=a.filter(Ht).length;return{ok:!0,label:r<a.length?`${s} · ${r}/${a.length} in`:s}}function Us(){const e=Pt();return`<button class="btn primary" data-act="next" ${e.ok?"":"disabled"}><span>${o.esc(e.label)}</span>${e.ok?'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg>':""}</button>`}function Bt(){if(t?.mp?.kind!=="online")return re();if(!y?.host)return;const e=y.gm;y.gm=t.i+1<t.rounds.length?{...e,n:t.i+1}:{...e,ph:"done"},P({gm:y.gm}),U()}function Ys(){if(t?.bonus)return fe();if(t?.mp?.kind==="online"){y?.host&&(y.gm={id:Ve(),mode:y.gm.mode,seed:Tt(),n:0,ph:"play"},P({gm:y.gm}),U());return}if(t?.mp?.kind==="local")return Fs(t.mode,t.timed);ha()}function Rt(e){const s=t.rounds[t.i],a=t.results[t.i],r=[];if((!t.mp?.kind||t.mp.kind==="online")&&a?.guess&&r.push({loc:a.guess,kind:"guess",text:t.mp?"You":"Your guess"}),t.mp)for(const i of G()){const n=i.results[t.i];!i.me&&n?.guess&&r.push({loc:n.guess,kind:"guess",small:!0,col:i.col,text:i.nm})}return r.push({loc:s.ing.loc,kind:"answer",ing:s.ing,text:s.ing.name,pop:e}),r}const zt=()=>G().filter(e=>!e.me&&e.results[t.i]?.guess).map(e=>e.peer).join(",");function Ws(){const e=G().sort((s,a)=>a.total-s.total);return`Fraguessr · ${z[t.mode].label} · ${e.length} players
+${e.map((s,a)=>`${zs[a]||`${a+1}.`} ${s.nm} ${s.total.toLocaleString()} ${t.rounds.map((r,i)=>be(s.results[i]?.points||0)).join("")}`).join(`
+`)}`}function Ks(){t.phase="done",clearInterval(x),C?.stop(),C=null,o.setTint(null);const e=t.mp.kind==="online",s=t.rounds.length*A,a=G().sort((u,g)=>g.total-u.total),r=a[0],i=a.length>1&&a[1].total===r.total;B(t.rounds.map(u=>({loc:u.ing.loc,kind:"answer",ing:u.ing,text:u.ing.name}))),w=[];const n=performance.now()+500;w.push({type:"confetti",t0:n,parts:ke(),colors:[r.col,O,"#4f8f63","#e2a336","#8e4ec6"]}),ie(`<span class="mono">${i?"Final scores":"Winner"}</span><b>${i?"It's a tie":`<span class="g-sw" style="--c:${r.col}">${o.esc(r.nm)}</span>`}</b>`),o.play.ver++,o.refresh(),o.flyTo(o.midpoint(t.rounds.map(u=>u.ing.loc)),.95),L.innerHTML=`<span class="mono muted">${e?`Room ${o.esc(y?.code||"")}`:"Pass and play"}</span><span class="g-hq">${i?"A tie at":`<b>${o.esc(r.nm)}</b> wins with`} ${r.total.toLocaleString()}</span>`;const l=!e||y?.host;S.textContent=l?"Play again":`Waiting for ${y?.hostName||"the host"}`,S.disabled=!l,S.classList.toggle("ready",l);const m=[a[1],a[0],a[2]];h.innerHTML=`
     <div class="game">
       <div class="detail-top"><button class="btn icon ghost" data-act="lobby" aria-label="Back to game menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
         <div class="crumbs"><span>Fraguessr</span><span>/</span><b>Standings</b></div></div>
       <div class="g-final">
-        <span class="mono muted">${MODES[S.mode].label} · ${ranked.length} players · ${online ? `Room ${A.esc(NET?.code || '')}` : 'Same device'}</span>
-        <h2 class="title">${tie ? "It's a tie!" : `${A.esc(win.nm)} wins`}</h2>
-        <div class="g-podium">${pod.map((p, k) => p ? `<div class="g-pod" style="--c:${p.col};--h:${[64, 92, 48][k]}px;--d:${[0.25, 0.05, 0.45][k]}s"><span class="g-av${k === 1 ? ' big' : ''}">${A.esc(initial(p.nm))}</span><b>${A.esc(p.nm)}</b><span class="mono g-pp" data-count="${p.total}">0</span><i class="g-step">${[2, 1, 3][k]}</i></div>` : '<div class="g-pod empty"></div>').join('')}</div>
+        <span class="mono muted">${z[t.mode].label} · ${a.length} players · ${e?`Room ${o.esc(y?.code||"")}`:"Same device"}</span>
+        <h2 class="title">${i?"It's a tie!":`${o.esc(r.nm)} wins`}</h2>
+        <div class="g-podium">${m.map((u,g)=>u?`<div class="g-pod" style="--c:${u.col};--h:${[64,92,48][g]}px;--d:${[.25,.05,.45][g]}s"><span class="g-av${g===1?" big":""}">${o.esc(J(u.nm))}</span><b>${o.esc(u.nm)}</b><span class="mono g-pp" data-count="${u.total}">0</span><i class="g-step">${[2,1,3][g]}</i></div>`:'<div class="g-pod empty"></div>').join("")}</div>
       </div>
       <div class="body">
-        <div class="g-table">${ranked.map((p, k) => `
-          <div class="g-row" style="--c:${p.col};--i:${k}"><span class="g-n mono">${k + 1}</span><span class="dot" style="background:${p.col}"></span>
-            <span class="g-nm">${A.esc(p.nm)}${p.me ? ' <em class="g-you">you</em>' : ''}<span class="g-sq">${S.rounds.map((_, i) => square(p.results[i]?.points || 0)).join('')}</span></span>
-            <span class="g-km mono">${Math.round(p.total / S.rounds.length).toLocaleString()} avg</span><span class="g-p mono">${p.total.toLocaleString()}</span>
-            <i class="g-rb" style="--p:${Math.min(1, p.total / max)}"></i></div>`).join('')}</div>
+        <div class="g-table">${a.map((u,g)=>`
+          <div class="g-row" style="--c:${u.col};--i:${g}"><span class="g-n mono">${g+1}</span><span class="dot" style="background:${u.col}"></span>
+            <span class="g-nm">${o.esc(u.nm)}${u.me?' <em class="g-you">you</em>':""}<span class="g-sq">${t.rounds.map((d,c)=>be(u.results[c]?.points||0)).join("")}</span></span>
+            <span class="g-km mono">${Math.round(u.total/t.rounds.length).toLocaleString()} avg</span><span class="g-p mono">${u.total.toLocaleString()}</span>
+            <i class="g-rb" style="--p:${Math.min(1,u.total/s)}"></i></div>`).join("")}</div>
         <div class="section-h"><span>The answers</span></div>
-        <div class="g-table">${S.rounds.map((R, i) => { const b = ranked.slice().sort((x, y) => (y.results[i]?.points || 0) - (x.results[i]?.points || 0))[0]; return `
-          <div class="g-row" style="--c:${A.ingHex(R.ing)}"><span class="g-n mono">${i + 1}</span><span class="dot" style="background:${A.ingHex(R.ing)}"></span>
-            <span class="g-nm">${A.esc(R.ing.name)}<span>${R.frag ? `${A.esc(R.frag.name)} · ` : ''}${A.esc(R.ing.place)}, ${A.esc(R.ing.country)}</span></span>
-            <span class="g-km mono" style="color:${b.col}">${A.esc(b.nm)}</span><span class="g-p mono">${(b.results[i]?.points || 0).toLocaleString()}</span></div>`; }).join('')}</div>
-        <div class="g-share"><code id="g-sharetext">${A.esc(mpShareText())}</code></div>
+        <div class="g-table">${t.rounds.map((u,g)=>{const d=a.slice().sort((c,p)=>(p.results[g]?.points||0)-(c.results[g]?.points||0))[0];return`
+          <div class="g-row" style="--c:${o.ingHex(u.ing)}"><span class="g-n mono">${g+1}</span><span class="dot" style="background:${o.ingHex(u.ing)}"></span>
+            <span class="g-nm">${o.esc(u.ing.name)}<span>${u.frag?`${o.esc(u.frag.name)} · `:""}${o.esc(u.ing.place)}, ${o.esc(u.ing.country)}</span></span>
+            <span class="g-km mono" style="color:${d.col}">${o.esc(d.nm)}</span><span class="g-p mono">${(d.results[g]?.points||0).toLocaleString()}</span></div>`}).join("")}</div>
+        <div class="g-share"><code id="g-sharetext">${o.esc(Ws())}</code></div>
         <div class="g-actions">
           <button class="btn" data-act="share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy result</span></button>
-          ${host ? `<button class="btn primary" data-act="again"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span>Play again</span></button>` : `<button class="btn" disabled><span>Waiting for ${A.esc(NET?.hostName || 'the host')}</span></button>`}
+          ${l?'<button class="btn primary" data-act="again"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg><span>Play again</span></button>':`<button class="btn" disabled><span>Waiting for ${o.esc(y?.hostName||"the host")}</span></button>`}
         </div>
-        ${online ? (NET?.host ? '<button class="btn ghost" data-act="to-room">Back to the room</button>' : '<button class="btn ghost" data-act="leave-room">Leave the room</button>') : '<button class="btn ghost" data-act="lobby">Back to the game menu</button>'}
+        ${e?y?.host?'<button class="btn ghost" data-act="to-room">Back to the room</button>':'<button class="btn ghost" data-act="leave-room">Leave the room</button>':'<button class="btn ghost" data-act="lobby">Back to the game menu</button>'}
       </div>
-    </div>`;
-  gameEl.querySelectorAll('.g-pp').forEach(countUp);
-  gameTop();
-  enter(gameEl.querySelector('.game')); enter(gameEl.querySelector('.g-table')); enter(gameEl.querySelector('.body'));
-}
-
-// ── online rooms ──
-let roomP = null, NET = null, lobUnsub = null, adKey = '';
-const getRoom = () => (roomP ||= Promise.resolve().then(() => window.claude?.use?.('room') ?? null).catch(() => null));
-function netNote(msg) { const el = gameEl.querySelector('[data-netnote]'); if (el) { el.textContent = msg; el.hidden = !msg; } }
-// the lobby lights up the online panel once the room answers, and lists rooms other people have open
-function lightOnline() {
-  getRoom().then((lob) => {
-    if (!gameEl.querySelector('[data-whop="online"]')) return;
-    if (!lob) {
-      netNote('Online rooms aren’t available on this site yet. Same device play works anywhere.');
-      gameEl.querySelectorAll('[data-whop="online"] input, [data-whop="online"] [data-act="join"]').forEach((x) => { x.disabled = true; });
-      gameEl.querySelector('[data-whop="online"]').classList.add('off');
-      return;
-    }
-    netNote('');
-    lobUnsub ||= lob.onPeers(() => paintOpen(), () => {});
-    paintOpen();
-  });
-}
-function paintOpen() {
-  const el = gameEl?.querySelector('[data-open]'); if (!el) return;
-  getRoom().then((lob) => {
-    if (!lob || !el.isConnected) return;
-    const rooms = lob.peers().filter((p) => !p.sameTab && ROOM_RE.test(p.presence?.open || '')).slice(0, 6);
-    el.innerHTML = rooms.length ? `<span class="g-oh mono">Open rooms</span>${rooms.map((p, k) => { const q = p.presence, nm = cleanName(q.nm, 'Someone'); return `<button class="g-oroom" data-act="join-open" data-code="${q.open}" style="--c:${cleanColor(q.col, k)}"><span class="g-av">${A.esc(initial(nm))}</span><span><b>${A.esc(nm)}'s room</b><span>${MODES[q.mode]?.label || 'Notes'} · ${Math.max(1, Math.min(99, q.n | 0))} in the room</span></span><span class="mono">${q.open}</span></button>`; }).join('')}` : '';
-  });
-}
-function createRoom(mode) {
-  const code = Array.from({ length: 4 }, () => pick1([...CODE_CH])).join('');
-  enterRoom(code, true, mode);
-}
-async function enterRoom(code, host, mode) {
-  if (!ROOM_RE.test(code)) return;
-  const lob = await getRoom();
-  if (!lob) return netNote('Online rooms aren’t available on this site yet.');
-  netNote(host ? 'Opening a room…' : `Joining ${code}…`);
-  await leaveRoom();
-  let room;
-  try { room = await lob.join('fg-' + code.toLowerCase()); } catch (e) {
-    return netNote(e?.code === 'limit_reached' ? 'Too many rooms are open right now. Try again in a moment.' : e?.code === 'not_permitted' ? 'Rooms are not available to you on this page.' : 'Could not reach that room. Try again.');
-  }
-  const me = myProfile();
-  NET = { code, room, lob, host, gm: host ? { id: newId(), mode: mode || 'notes', seed: 0, n: -1, ph: 'room' } : null, seen: null, peers: room.peers(), since: Date.now(), unsub: [], up: room.connected(), hostName: '' };
-  const N = NET;
-  N.claim = host ? Date.now() : 0;
-  pub({ v: 1, nm: me.nm, col: me.col, h: host ? 1 : 0, hs: N.claim, gm: N.gm, gid: null, r: [] });
-  N.unsub.push(room.onPeers((ch) => { if (NET === N) { N.peers = ch.peers; onNet(); } }, () => { if (NET === N) { N.up = false; paintConn(); } }));
-  N.unsub.push(room.onConnection((c) => { if (NET === N) { N.up = c; paintConn(); } }));
-  // give the room a moment to introduce everyone before deciding there is no host
-  setTimeout(() => NET === N && onNet(), 3200);
-  setTimeout(() => NET === N && onNet(), 10200);
-  S = null; A.setHash('play');
-  roomScreen();
-  onNet();
-}
-async function leaveRoom() {
-  const N = NET; NET = null; adKey = '';
-  if (!N) return;
-  N.unsub.forEach((u) => u());
-  N.lob.presence({ open: null }).catch(() => {});
-  await N.room.leave().catch(() => {});
-}
-function pub(patch) { NET?.room.presence(patch).catch(() => {}); }
-function players() {
-  if (!NET) return [];
-  const list = NET.peers.filter((p) => p.kind === 'viewer' && p.presence?.v === 1).slice().sort((a, b) => (a.peer < b.peer ? -1 : a.peer > b.peer ? 1 : 0))
-    .map((p, k) => ({ peer: p.peer, me: p.isMe && p.sameTab, nm: cleanName(p.presence.nm, 'Player'), col: cleanColor(p.presence.col, k), h: p.presence.h === 1, hs: Number(p.presence.hs) || 0, gm: p.presence.gm, gid: p.presence.gid, r: Array.isArray(p.presence.r) ? p.presence.r : [] }));
-  if (!list.some((p) => p.me)) { const me = myProfile(); list.push({ peer: '~', me: true, nm: me.nm, col: me.col, h: NET.host, hs: NET.claim, gm: NET.gm, gid: S?.mp?.gid, r: [] }); }
-  return list;
-}
-function cleanGm(g) {
-  if (!g || typeof g !== 'object' || typeof g.id !== 'string') return null;
-  return { id: g.id.slice(0, 12), mode: MODES[g.mode] ? g.mode : 'notes', ph: ['room', 'play', 'done'].includes(g.ph) ? g.ph : 'room', n: Number.isInteger(g.n) ? Math.max(-1, Math.min(ROUNDS - 1, g.n)) : -1, seed: Number(g.seed) >>> 0 };
-}
-// everything that happens in the room comes through here: work out the host and follow their game
-function onNet() {
-  const N = NET; if (!N) return;
-  const ps = players(), now = Date.now();
-  // the earliest claim wins if two pages ever both think they host
-  let host = ps.filter((p) => p.h).sort((a, b) => a.hs - b.hs || (a.peer < b.peer ? -1 : 1))[0];
-  if (N.host && host && !host.me) { N.host = false; N.gm = null; pub({ h: 0, gm: null }); }
-  // nobody hosting: the host left (pick up their game), or this room was empty, or no one has spoken up for a while
-  if (host) N.lostAt = 0; else if (N.seen && !N.lostAt) N.lostAt = now;
-  const vacant = !host && ((N.lostAt && now - N.lostAt > 2500) || (ps.length === 1 && now - N.since > 3000) || now - N.since > 10000);
-  if (vacant && ps[0]?.me) {
-    N.host = true; N.claim = now; N.gm = N.seen || { id: newId(), mode: store.get('mode') || 'notes', seed: 0, n: -1, ph: 'room' };
-    pub({ h: 1, hs: N.claim, gm: N.gm }); host = ps[0];
-  } else if (!host && !N.retry) N.retry = setTimeout(() => { N.retry = 0; if (NET === N) onNet(); }, 1500);
-  const gm = N.host ? N.gm : cleanGm(host?.gm);
-  if (gm) N.seen = gm;
-  N.hostName = host?.nm || '';
-  advertise(ps);
-  if (!gm || gm.ph === 'room' || gm.n < 0) {
-    if (S?.mp?.kind === 'online') { S = null; clearInterval(timer); clearPins(); fxItems = []; A.play.ver++; A.refresh(); roomScreen(); }
-    else roomScreen(true);
-    return;
-  }
-  follow(gm);
-  live();
-}
-function follow(gm) {
-  if (!S || S.mp?.gid !== gm.id) {
-    S = rules({ mode: gm.mode, seed: gm.seed, rounds: buildRounds(gm.mode, gm.seed, A.USES), i: -1, results: [], total: 0, mp: { kind: 'online', gid: gm.id } });
-    pub({ gid: gm.id, r: [] });
-    A.setHash('play-' + gm.mode);
-  }
-  if (S.i < gm.n) {
-    // the host moved on: lock in whatever this player had, and skip any rounds they missed by joining late
-    if (S.phase === 'guess' && S.i >= 0) { clearInterval(timer); const r = record(); S.results.push(r); S.total += r.points; }
-    while (S.results.length < gm.n) { const R = S.rounds[S.results.length]; S.results.push({ ing: R.ing, frag: R.frag, guess: null, km: null, points: 0, clues: 0, sc: scoreRound({ km: null, clues: 0, free: 0 }), left: 0 }); }
-    publishMine();
-    S.i = gm.n - 1; next();
-  }
-  if (gm.ph === 'done' && S.phase !== 'done') {
-    if (S.phase === 'guess') { clearInterval(timer); const r = record(); S.results.push(r); S.total += r.points; publishMine(); }
-    standings();
-  }
-}
-// pins travel rounded to about a kilometre, with the hints used and seconds left so every page can score them
-function publishMine() {
-  pub({ gid: S.mp.gid, r: S.results.map((r) => (r.guess ? [Math.round(r.guess[0] * 100) / 100, Math.round(r.guess[1] * 100) / 100, r.clues, r.left] : 0)) });
-}
-function theirResults(p) {
-  if (!S || p.gid !== S.mp.gid) return [];
-  return p.r.slice(0, S.rounds.length).map((e, k) => {
-    const R = S.rounds[k];
-    if (e === 0) return { ing: R.ing, guess: null, km: null, points: 0, clues: 0 };
-    if (!Array.isArray(e)) return null;
-    const lat = Number(e[0]), lng = Number(e[1]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-    const guess = [lat, lng], km = A.haversine(guess, R.ing.loc);
-    const clues = Math.max(0, Math.min(3, e[2] | 0)), left = Math.max(0, Math.min(TIME, e[3] | 0));
-    const sc = scoreRound({ km, clues, free: 0, timed: true, left, time: TIME });
-    return { ing: R.ing, guess, km, points: sc.points, clues, sc };
-  });
-}
-// refresh the parts of the screen that show other players
-function live() {
-  if (S?.mp?.kind !== 'online' || S.phase === 'done') return;
-  const b = gameEl.querySelector('[data-board]'); if (b) b.innerHTML = boardHtml();
-  const c = gameEl.querySelector('[data-chips]'); if (c) c.innerHTML = chipsHtml();
-  const lc = gameEl.querySelector('[data-lockcount]'); if (lc) lc.textContent = lockCount();
-  const nb = gameEl.querySelector('.g-cta [data-act="next"]');
-  if (nb) { const st = nextState(); nb.disabled = !st.ok; nb.firstChild.textContent = st.label; }
-  renderHud();
-  if (S.phase === 'reveal' && S.results[S.i]?.arrived && othersKey() !== S.mp.pinKey) { S.mp.pinKey = othersKey(); setPins(revealPins(false)); A.play.ver++; A.refresh(); }
-}
-function startOnline() {
-  if (!NET?.host) return;
-  NET.gm = { id: newId(), mode: NET.gm?.mode || 'notes', seed: newSeed(), n: 0, ph: 'play' };
-  pub({ gm: NET.gm }); onNet();
-}
-function backToRoom() {
-  if (!NET?.host) return;
-  NET.gm = { ...NET.gm, ph: 'room', n: -1 };
-  pub({ gm: NET.gm }); onNet();
-}
-// hosts with a room still in its waiting stage list it in the shared lobby so friends can tap in
-function advertise(ps) {
-  const N = NET; if (!N) return;
-  const me = myProfile(), open = N.host && N.gm?.ph === 'room';
-  const ad = open ? { open: N.code, nm: me.nm, col: me.col, mode: N.gm.mode, n: ps.length } : { open: null };
-  const key = JSON.stringify(ad); if (key === adKey) return; adKey = key;
-  N.lob.presence(ad).catch(() => {});
-}
-function paintConn() {
-  const el = gameEl.querySelector('[data-conn]'); if (!el || !NET) return;
-  el.textContent = NET.up ? 'Live' : 'Reconnecting'; el.classList.toggle('off', !NET.up);
-}
-function roomScreen(soft) {
-  if (!NET) return;
-  if (soft && gameEl.querySelector('[data-roomscreen]')) return paintRoom();
-  clearInterval(timer); clearPins(); vignette?.stop(); vignette = null; fxItems = [];
-  hud.classList.remove('show'); fab.classList.remove('show'); fab.hidden = true;
-  A.setTint(null);
-  const me = myProfile();
-  gameEl.innerHTML = `
+    </div>`,h.querySelectorAll(".g-pp").forEach(Pe),V(),q(h.querySelector(".game")),q(h.querySelector(".g-table")),q(h.querySelector(".body"))}let hn=null,y=null,mn=null,Dt="";const Ot=()=>hn||=Promise.resolve().then(()=>window.claude?.use?.("room")??null).catch(()=>null);function he(e){const s=h.querySelector("[data-netnote]");s&&(s.textContent=e,s.hidden=!e)}function fn(){Ot().then(e=>{if(h.querySelector('[data-whop="online"]')){if(!e){he("Online rooms aren’t available on this site yet. Same device play works anywhere."),h.querySelectorAll('[data-whop="online"] input, [data-whop="online"] [data-act="join"]').forEach(s=>{s.disabled=!0}),h.querySelector('[data-whop="online"]').classList.add("off");return}he(""),mn||=e.onPeers(()=>Vs(),()=>{}),Vs()}})}function Vs(){const e=h?.querySelector("[data-open]");e&&Ot().then(s=>{if(!s||!e.isConnected)return;const a=s.peers().filter(r=>!r.sameTab&&Rs.test(r.presence?.open||"")).slice(0,6);e.innerHTML=a.length?`<span class="g-oh mono">Open rooms</span>${a.map((r,i)=>{const n=r.presence,l=Se(n.nm,"Someone");return`<button class="g-oroom" data-act="join-open" data-code="${n.open}" style="--c:${We(n.col,i)}"><span class="g-av">${o.esc(J(l))}</span><span><b>${o.esc(l)}'s room</b><span>${z[n.mode]?.label||"Notes"} · ${Math.max(1,Math.min(99,n.n|0))} in the room</span></span><span class="mono">${n.open}</span></button>`}).join("")}`:""})}function gn(e){const s=Array.from({length:4},()=>Ke([...rn])).join("");Ft(s,!0,e)}async function Ft(e,s,a){if(!Rs.test(e))return;const r=await Ot();if(!r)return he("Online rooms aren’t available on this site yet.");he(s?"Opening a room…":`Joining ${e}…`),await xe();let i;try{i=await r.join("fg-"+e.toLowerCase())}catch(m){return he(m?.code==="limit_reached"?"Too many rooms are open right now. Try again in a moment.":m?.code==="not_permitted"?"Rooms are not available to you on this page.":"Could not reach that room. Try again.")}const n=ue();y={code:e,room:i,lob:r,host:s,gm:s?{id:Ve(),mode:a||"notes",seed:0,n:-1,ph:"room"}:null,seen:null,peers:i.peers(),since:Date.now(),unsub:[],up:i.connected(),hostName:""};const l=y;l.claim=s?Date.now():0,P({v:1,nm:n.nm,col:n.col,h:s?1:0,hs:l.claim,gm:l.gm,gid:null,r:[]}),l.unsub.push(i.onPeers(m=>{y===l&&(l.peers=m.peers,U())},()=>{y===l&&(l.up=!1,Yt())})),l.unsub.push(i.onConnection(m=>{y===l&&(l.up=m,Yt())})),setTimeout(()=>y===l&&U(),3200),setTimeout(()=>y===l&&U(),10200),t=null,o.setHash("play"),Wt(),U()}async function xe(){const e=y;y=null,Dt="",e&&(e.unsub.forEach(s=>s()),e.lob.presence({open:null}).catch(()=>{}),await e.room.leave().catch(()=>{}))}function P(e){y?.room.presence(e).catch(()=>{})}function Gt(){if(!y)return[];const e=y.peers.filter(s=>s.kind==="viewer"&&s.presence?.v===1).slice().sort((s,a)=>s.peer<a.peer?-1:s.peer>a.peer?1:0).map((s,a)=>({peer:s.peer,me:s.isMe&&s.sameTab,nm:Se(s.presence.nm,"Player"),col:We(s.presence.col,a),h:s.presence.h===1,hs:Number(s.presence.hs)||0,gm:s.presence.gm,gid:s.presence.gid,r:Array.isArray(s.presence.r)?s.presence.r:[]}));if(!e.some(s=>s.me)){const s=ue();e.push({peer:"~",me:!0,nm:s.nm,col:s.col,h:y.host,hs:y.claim,gm:y.gm,gid:t?.mp?.gid,r:[]})}return e}function bn(e){return!e||typeof e!="object"||typeof e.id!="string"?null:{id:e.id.slice(0,12),mode:z[e.mode]?e.mode:"notes",ph:["room","play","done"].includes(e.ph)?e.ph:"room",n:Number.isInteger(e.n)?Math.max(-1,Math.min(et-1,e.n)):-1,seed:Number(e.seed)>>>0}}function U(){const e=y;if(!e)return;const s=Gt(),a=Date.now();let r=s.filter(l=>l.h).sort((l,m)=>l.hs-m.hs||(l.peer<m.peer?-1:1))[0];e.host&&r&&!r.me&&(e.host=!1,e.gm=null,P({h:0,gm:null})),r?e.lostAt=0:e.seen&&!e.lostAt&&(e.lostAt=a),!r&&(e.lostAt&&a-e.lostAt>2500||s.length===1&&a-e.since>3e3||a-e.since>1e4)&&s[0]?.me?(e.host=!0,e.claim=a,e.gm=e.seen||{id:Ve(),mode:$.get("mode")||"notes",seed:0,n:-1,ph:"room"},P({h:1,hs:e.claim,gm:e.gm}),r=s[0]):!r&&!e.retry&&(e.retry=setTimeout(()=>{e.retry=0,y===e&&U()},1500));const n=e.host?e.gm:bn(r?.gm);if(n&&(e.seen=n),e.hostName=r?.nm||"",Sn(s),!n||n.ph==="room"||n.n<0){t?.mp?.kind==="online"?(t=null,clearInterval(x),F(),w=[],o.play.ver++,o.refresh(),Wt()):Wt(!0);return}yn(n),$n()}function yn(e){if((!t||t.mp?.gid!==e.id)&&(t=ge({mode:e.mode,seed:e.seed,rounds:Ne(e.mode,e.seed,o.USES),i:-1,results:[],total:0,mp:{kind:"online",gid:e.id}}),P({gid:e.id,r:[]}),o.setHash("play-"+e.mode)),t.i<e.n){if(t.phase==="guess"&&t.i>=0){clearInterval(x);const s=je();t.results.push(s),t.total+=s.points}for(;t.results.length<e.n;){const s=t.rounds[t.results.length];t.results.push({ing:s.ing,frag:s.frag,guess:null,km:null,points:0,clues:0,sc:qe({km:null,clues:0,free:0}),left:0})}Ut(),t.i=e.n-1,re()}if(e.ph==="done"&&t.phase!=="done"){if(t.phase==="guess"){clearInterval(x);const s=je();t.results.push(s),t.total+=s.points,Ut()}Ks()}}function Ut(){P({gid:t.mp.gid,r:t.results.map(e=>e.guess?[Math.round(e.guess[0]*100)/100,Math.round(e.guess[1]*100)/100,e.clues,e.left]:0)})}function vn(e){return!t||e.gid!==t.mp.gid?[]:e.r.slice(0,t.rounds.length).map((s,a)=>{const r=t.rounds[a];if(s===0)return{ing:r.ing,guess:null,km:null,points:0,clues:0};if(!Array.isArray(s))return null;const i=Number(s[0]),n=Number(s[1]);if(!Number.isFinite(i)||!Number.isFinite(n)||Math.abs(i)>90||Math.abs(n)>180)return null;const l=[i,n],m=o.haversine(l,r.ing.loc),u=Math.max(0,Math.min(3,s[2]|0)),g=Math.max(0,Math.min(Q,s[3]|0)),d=qe({km:m,clues:u,free:0,timed:!0,left:g,time:Q});return{ing:r.ing,guess:l,km:m,points:d.points,clues:u,sc:d}})}function $n(){if(t?.mp?.kind!=="online"||t.phase==="done")return;const e=h.querySelector("[data-board]");e&&(e.innerHTML=It());const s=h.querySelector("[data-chips]");s&&(s.innerHTML=jt());const a=h.querySelector("[data-lockcount]");a&&(a.textContent=Et());const r=h.querySelector('.g-cta [data-act="next"]');if(r){const i=Pt();r.disabled=!i.ok,r.firstChild.textContent=i.label}_(),t.phase==="reveal"&&t.results[t.i]?.arrived&&zt()!==t.mp.pinKey&&(t.mp.pinKey=zt(),B(Rt(!1)),o.play.ver++,o.refresh())}function wn(){y?.host&&(y.gm={id:Ve(),mode:y.gm?.mode||"notes",seed:Tt(),n:0,ph:"play"},P({gm:y.gm}),U())}function kn(){y?.host&&(y.gm={...y.gm,ph:"room",n:-1},P({gm:y.gm}),U())}function Sn(e){const s=y;if(!s)return;const a=ue(),i=s.host&&s.gm?.ph==="room"?{open:s.code,nm:a.nm,col:a.col,mode:s.gm.mode,n:e.length}:{open:null},n=JSON.stringify(i);n!==Dt&&(Dt=n,s.lob.presence(i).catch(()=>{}))}function Yt(){const e=h.querySelector("[data-conn]");!e||!y||(e.textContent=y.up?"Live":"Reconnecting",e.classList.toggle("off",!y.up))}function Wt(e){if(!y)return;if(e&&h.querySelector("[data-roomscreen]"))return Kt();clearInterval(x),F(),C?.stop(),C=null,w=[],L.classList.remove("show"),S.classList.remove("show"),S.hidden=!0,o.setTint(null);const s=ue();h.innerHTML=`
     <div class="game" data-roomscreen>
       <div class="detail-top"><button class="btn icon ghost" data-act="leave-room" aria-label="Leave the room"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
         <div class="crumbs"><span>Fraguessr</span><span>/</span><b>Online room</b></div><span class="g-conn mono" data-conn></span></div>
       <div class="g-roomhead">
         <span class="mono g-kicker">Room code</span>
-        <div class="g-code" aria-label="Room code ${NET.code}">${[...NET.code].map((ch, k) => `<b style="--i:${k}">${ch}</b>`).join('')}</div>
+        <div class="g-code" aria-label="Room code ${y.code}">${[...y.code].map((a,r)=>`<b style="--i:${r}">${a}</b>`).join("")}</div>
         <p class="prose muted">Friends open Fraguessr, choose <b>Play</b> then <b>Online room</b>, and join with this code. While the room is waiting it also shows up in their list of open rooms.</p>
         <button class="btn" data-act="copy-code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg><span>Copy code</span></button>
       </div>
       <div class="section-h"><span>In the room</span><span class="mono" data-pcount></span></div>
       <div class="g-players" data-players></div>
       <div class="g-roomme">
-        <label class="g-field"><span>Your name</span><input data-nick maxlength="18" autocomplete="off" value="${A.esc(me.nm)}"></label>
-        <div class="g-colors" role="group" aria-label="Your colour">${colorDots(me.col)}</div>
+        <label class="g-field"><span>Your name</span><input data-nick maxlength="18" autocomplete="off" value="${o.esc(s.nm)}"></label>
+        <div class="g-colors" role="group" aria-label="Your colour">${Ds(s.col)}</div>
       </div>
       <div data-hostbits></div>
       <button class="btn ghost g-leave" data-act="leave-room">Leave the room</button>
-    </div>`;
-  gameTop();
-  enter(gameEl.querySelector('.game'));
-  NET.hostKey = '';
-  paintRoom();
-}
-function paintRoom() {
-  const el = gameEl.querySelector('[data-roomscreen]'); if (!el || !NET) return;
-  const ps = players();
-  el.querySelector('[data-players]').innerHTML = ps.map((p) => `<div class="g-pl${p.me ? ' me' : ''}" style="--c:${p.col}"><span class="g-av">${A.esc(initial(p.nm))}</span><b>${A.esc(p.nm)}</b>${p.me ? '<em>you</em>' : ''}${p.h ? '<span class="badge soft mono">host</span>' : ''}</div>`).join('');
-  el.querySelector('[data-pcount]').textContent = `${ps.length} player${ps.length === 1 ? '' : 's'}`;
-  const mode = (NET.host ? NET.gm?.mode : NET.seen?.mode) || 'notes';
-  const key = `${NET.host}|${mode}|${NET.hostName}|${NET.host ? ps.length : ''}`;
-  if (key !== NET.hostKey) {
-    NET.hostKey = key;
-    el.querySelector('[data-hostbits]').innerHTML = NET.host
-      ? `<div class="section-h"><span>Mode</span></div>
-        <div class="g-modes compact" role="radiogroup">${Object.entries(MODES).map(([k, m]) => `
-          <button class="g-mode" role="radio" data-mode="${k}" aria-checked="${k === mode}"><span class="g-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${m.icon}</svg></span><span class="g-mt">${m.label}<span>${m.blurb}</span></span><span></span></button>`).join('')}</div>
-        <button class="btn primary g-start" data-act="start-room"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg>${ps.length > 1 ? `Start with ${ps.length} players` : 'Start (you can play alone too)'}</button>`
-      : `<div class="g-wait"><span class="g-wd"><i></i><i></i><i></i></span><span>Waiting for <b>${A.esc(NET.hostName || 'the host')}</b> to start a <b>${MODES[mode].label}</b> game</span></div>`;
-  }
-  paintConn();
-}
+    </div>`,V(),q(h.querySelector(".game")),y.hostKey="",Kt()}function Kt(){const e=h.querySelector("[data-roomscreen]");if(!e||!y)return;const s=Gt();e.querySelector("[data-players]").innerHTML=s.map(i=>`<div class="g-pl${i.me?" me":""}" style="--c:${i.col}"><span class="g-av">${o.esc(J(i.nm))}</span><b>${o.esc(i.nm)}</b>${i.me?"<em>you</em>":""}${i.h?'<span class="badge soft mono">host</span>':""}</div>`).join(""),e.querySelector("[data-pcount]").textContent=`${s.length} player${s.length===1?"":"s"}`;const a=(y.host?y.gm?.mode:y.seen?.mode)||"notes",r=`${y.host}|${a}|${y.hostName}|${y.host?s.length:""}`;r!==y.hostKey&&(y.hostKey=r,e.querySelector("[data-hostbits]").innerHTML=y.host?`<div class="section-h"><span>Mode</span></div>
+        <div class="g-modes compact" role="radiogroup">${Object.entries(z).map(([i,n])=>`
+          <button class="g-mode" role="radio" data-mode="${i}" aria-checked="${i===a}"><span class="g-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${n.icon}</svg></span><span class="g-mt">${n.label}<span>${n.blurb}</span></span><span></span></button>`).join("")}</div>
+        <button class="btn primary g-start" data-act="start-room"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l12-7.5z"/></svg>${s.length>1?`Start with ${s.length} players`:"Start (you can play alone too)"}</button>`:`<div class="g-wait"><span class="g-wd"><i></i><i></i><i></i></span><span>Waiting for <b>${o.esc(y.hostName||"the host")}</b> to start a <b>${z[a].label}</b> game</span></div>`),Yt()}export{Tn as closeGame,Sa as dailyInfo,$t as dailyStats,Hn as openDailyChest,An as openGame,Ga as openHelp,Ua as openStats,es as region,Nn as scentPoolIds,sa as scoreFor,Va as seeDailyChest,_a as showDaily,qn as todayScent};
