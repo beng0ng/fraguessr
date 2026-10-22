@@ -532,8 +532,9 @@ function again() {
 }
 
 // ── daily scent: one famous perfume a day, name its notes ─────
-// Five chances. A wrong note costs one and buys a hint about a note still hidden; a right one reveals the note,
-// flies the globe to where it grows and deals one of its fun facts, drawn by the same rarity odds as a blend.
+// Five chances. One hidden note always carries a clue (its tier, family and source country); finding that note
+// passes a fresh clue to another one. A wrong note costs a chance and sharpens the clue. A right one reveals the
+// note, flies the globe to where it grows and deals one of its fun facts, drawn by the same rarity odds as a blend.
 const SCENT_LIVES = 5, SCENT_MIN = 5, SCENT_MAX = 19;
 const SCENT_POOL = ['chanel-no-5', 'chanel-coco-mademoiselle', 'chanel-bleu-de-chanel-edp', 'chanel-chance', 'chanel-allure-homme-sport', 'chanel-egoiste', 'chanel-no-19', 'chanel-coco-noir', 'chanel-coco', 'chanel-allure',
   'dior-sauvage-edt', 'dior-sauvage-elixir', 'dior-miss-dior-blooming-bouquet', 'dior-poison', 'dior-hypnotic-poison', 'dior-eau-sauvage', 'dior-diorissimo', 'dior-dune', 'dior-dolce-vita',
@@ -677,6 +678,7 @@ function scentOpen(daily, fid) {
   const f = daily ? scentOf(d) : FRAGRANCES.find((x) => x.id === fid) || (() => { const others = pool.filter((x) => x !== scentOf(d) && x.id !== S?.f?.id); return others[Math.floor(Math.random() * others.length)]; })();
   S = { kind: 'scent', phase: 'scent', daily, date: d, f, notes: scentNotes(f), found: new Set(), tried: [], hints: [], level: {}, target: null, lives: SCENT_LIVES, log: [], last: null, intro: true };
   const saved = daily && store.get(`scent:${d}`);
+  scentSpot(true);
   if (saved?.id === f.id) for (const e of saved.log) scentApply(e, true);
   if (saved?.over) S.phase = 'done';
   A.setHash(daily ? 'play-daily' : 'play');
@@ -688,24 +690,45 @@ function scentOpen(daily, fid) {
 // one guess, live or replayed from today's saved log
 function scentApply(e, quiet) {
   const x = S.notes.find((n) => n.id === e.id);
-  if (e.hit) { S.found.add(e.id); S.last = { id: e.id, r: e.r, isNew: !!e.isNew }; if (S.target === e.id) S.target = null; }
+  if (e.hit) { S.found.add(e.id); S.last = { id: e.id, r: e.r, isNew: !!e.isNew }; }
   else { S.tried.push(e.id); S.lives--; if (S.lives > 0) scentHint(quiet); }
   S.log.push(e);
   if (S.lives <= 0 || S.notes.every((n) => !n.id || S.found.has(n.id))) S.phase = 'done';
+  else if (e.hit && S.target === e.id) { S.target = null; scentSpot(quiet); }
   return x;
+}
+// the clue passes to another hidden note: picked by the day's seed, so everyone playing today follows the same
+// trail, with well-known notes a little likelier than obscure ones
+function scentSpot(quiet) {
+  const hidden = S.notes.filter((x) => x.id && !S.found.has(x.id));
+  if (!hidden.length) return;
+  S.spots = (S.spots || 0) + 1;
+  const r = rng([...`${S.f.id}|${S.date}|${S.spots}`].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261));
+  const w = hidden.map((x) => Math.sqrt(1 + A.USES[x.id].length)); let k = r() * w.reduce((a, b) => a + b, 0), i = 0;
+  while (i < w.length - 1 && (k -= w[i]) > 0) i++;
+  const t = hidden[i], ing = A.ING[t.id], fam = FAMILIES[ing.family].label.toLowerCase();
+  S.target = t.id;
+  const lv = (S.level[t.id] = Math.max(2, (S.level[t.id] || 0) + 1));
+  const text = lv === 2 ? `One of the hidden ${t.t} notes is ${an(fam)} note, and its best-known source is ${ing.country}.` : scentClue(t, lv);
+  S.hints.push({ id: t.id, lv, text, spot: 1 });
+  if (!quiet) { const t0 = performance.now() + 1400; for (const k of [0, 1, 2]) fxItems.push({ type: 'ripple', loc: ing.loc, t0: t0 + k * 500, color: famHex(ing.family) }); }
+}
+function scentClue(t, lv) {
+  const ing = A.ING[t.id], fam = FAMILIES[ing.family].label.toLowerCase();
+  return lv === 1 ? `One of the hidden ${t.t} notes is ${an(fam)} note.`
+    : lv === 2 ? `That ${fam} note grows in ${region(ing.loc, ing.country)}. The globe has turned to show you where.`
+    : lv === 3 ? redact(`Part used: ${ing.part}. How it is made: ${ing.method}.`, ing, true)
+    : `It is listed as ${pattern(t.n)}, ${t.n.replace(/[^\p{L}]/gu, '').length} letters starting with ${t.n.charAt(0).toUpperCase()}.`;
 }
 function scentHint(quiet) {
   const hidden = S.notes.filter((x) => x.id && !S.found.has(x.id));
   if (!hidden.length) return;
-  // keep hinting at the same note until it is found, starting with the most widely used one left
-  let t = hidden.find((x) => x.id === S.target);
-  if (!t) { t = hidden.slice().sort((a, b) => A.USES[b.id].length - A.USES[a.id].length)[0]; S.target = t.id; }
-  const lv = (S.level[t.id] = (S.level[t.id] || 0) + 1), ing = A.ING[t.id], fam = FAMILIES[ing.family].label.toLowerCase();
-  const text = lv === 1 ? `One of the hidden ${t.t} notes is ${an(fam)} note.`
-    : lv === 2 ? `That ${fam} note grows in ${region(ing.loc, ing.country)}. The globe has turned to show you where.`
-    : lv === 3 ? redact(`Part used: ${ing.part}. How it is made: ${ing.method}.`, ing, true)
-    : `It is listed as ${pattern(t.n)}, ${t.n.replace(/[^\p{L}]/gu, '').length} letters starting with ${t.n.charAt(0).toUpperCase()}.`;
-  S.hints.push({ id: t.id, lv, text });
+  // a miss sharpens the clued note's clue; once that one is spelled out, the next miss hints at the most widely used other note
+  let t = hidden.find((x) => x.id === S.target && (S.level[x.id] || 0) < 4);
+  if (!t) t = hidden.filter((x) => x.id !== S.target).sort((a, b) => (S.level[a.id] || 0) - (S.level[b.id] || 0) || A.USES[b.id].length - A.USES[a.id].length)[0];
+  if (!t || (S.level[t.id] || 0) >= 4) return;
+  const lv = (S.level[t.id] = (S.level[t.id] || 0) + 1), ing = A.ING[t.id];
+  S.hints.push({ id: t.id, lv, text: scentClue(t, lv) });
   if (!quiet && lv === 2) { A.flyTo(ing.loc, 1.05); const t0 = performance.now() + 900; for (const k of [0, 1, 2]) fxItems.push({ type: 'ripple', loc: ing.loc, t0: t0 + k * 500, color: famHex(ing.family) }); }
 }
 const pattern = (n) => n.split(/\s+/).map((w) => w.charAt(0).toUpperCase() + '·'.repeat(Math.max(0, [...w].length - 1))).join(' ');
@@ -722,27 +745,27 @@ function scentGuess(raw, id) {
   input.value = '';
   if (res.hit) {
     const x = res.hit, r = A.facts.draw(x.id), isNew = A.facts.discover(x.id, r), drops = A.facts.earn?.(x.id, r) || 0; A.notes?.collect(x.id);
-    scentApply({ id: x.id, hit: 1, r, isNew: isNew ? 1 : 0 });
+    const spot = S.spots; scentApply({ id: x.id, hit: 1, r, isNew: isNew ? 1 : 0 }); res.clue = S.spots !== spot && S.phase === 'scent';
     const ing = A.ING[x.id], col = A.ingHex(ing), t = performance.now() + 700;
     A.flyTo(ing.loc, 1.5);
     fxItems.push({ type: 'burst', loc: ing.loc, t0: t, color: col, parts: sparks(26) }, { type: 'float', loc: ing.loc, t0: t, text: ing.name, color: col });
     scentPins(x.id); scentLinks(x.id);
     const rr = rareOf(x.id);
-    say.innerHTML = `<span class="g-pts r-${rr.label.toLowerCase()}">+${rr.pts}</span><b>${A.esc(x.n.charAt(0).toUpperCase() + x.n.slice(1))}</b> is in it, ${an(x.t)} note from ${A.esc(ing.country)}. ${rr.label === 'Rare' || rr.label === 'Uncommon' ? `A ${rr.label.toLowerCase()} find: only ${rr.pct}% of perfumes list it.` : `${rr.label} note, in ${rr.pct}% of perfumes.`} You found ${an(RARITY[r].label.toLowerCase())} fact${isNew ? '' : ' you already had'}${drops ? ` and <b class="g-drops-won">${drops} drops</b> of ${A.esc(x.n)} essence` : ''}.`;
+    say.innerHTML = `<span class="g-pts r-${rr.label.toLowerCase()}">+${rr.pts}</span><b>${A.esc(x.n.charAt(0).toUpperCase() + x.n.slice(1))}</b> is in it, ${an(x.t)} note from ${A.esc(ing.country)}. ${rr.label === 'Rare' || rr.label === 'Uncommon' ? `A ${rr.label.toLowerCase()} find: only ${rr.pct}% of perfumes list it.` : `${rr.label} note, in ${rr.pct}% of perfumes.`} You found ${an(RARITY[r].label.toLowerCase())} fact${isNew ? '' : ' you already had'}${drops ? ` and <b class="g-drops-won">${drops} drops</b> of ${A.esc(x.n)} essence` : ''}.${res.clue ? ' That was the clued note, so a new clue is below.' : ''}`;
     say.className = 'g-sc-say hit';
   } else {
     scentApply({ id: res.miss, hit: 0 });
-    say.innerHTML = S.lives ? `No <b>${nm(res.miss)}</b> in this one. ${S.lives} chance${S.lives === 1 ? '' : 's'} left, and a new hint below.` : `No <b>${nm(res.miss)}</b> in this one, and that was your last chance.`;
+    say.innerHTML = S.lives ? `No <b>${nm(res.miss)}</b> in this one. ${S.lives} chance${S.lives === 1 ? '' : 's'} left, and a sharper hint below.` : `No <b>${nm(res.miss)}</b> in this one, and that was your last chance.`;
     say.className = 'g-sc-say miss';
     const box = gameEl.querySelector('.g-sc-field'); box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
   }
   if (S.daily) store.set(`scent:${S.date}`, { id: S.f.id, log: S.log, over: S.phase === 'done' }); A.saved?.();
   if (S.phase === 'done') { S.fresh = res.hit?.id; return scentFinish(); }
   if (res.hit) A.milestones?.({ avoid: S.notes.filter((n) => n.id && !S.found.has(n.id)).map((n) => n.id) });
-  S.fresh = res.hit?.id; S.justLost = !res.hit; S.freshHint = res.hit ? null : S.hints[S.hints.length - 1]?.id;
+  S.fresh = res.hit?.id; S.justLost = !res.hit; S.freshHint = res.hit && !res.clue ? null : S.hints[S.hints.length - 1]?.id; S.newHint = !res.hit || res.clue;
   scentUpdate();
-  S.fresh = S.justLost = S.freshHint = null;
-  if (res.hit) { scentFact(gameEl.querySelector('[data-sc-fact]'), S.last); scentCheer(res.hit.id); } else scentSigh();
+  S.fresh = S.justLost = S.freshHint = S.newHint = null;
+  if (res.hit) { scentFact(gameEl.querySelector('[data-sc-fact]'), S.last); scentCheer(res.hit.id); if (res.clue) setTimeout(scentNewClue, 900); } else scentSigh();
   if (!matchMedia('(hover: none)').matches) input.focus();
 }
 // a found note: a drop of it arcs from the box into its slot, which flips over in a burst of its colour,
@@ -757,11 +780,15 @@ function scentCheer(id) {
 // a miss: the lost drop evaporates, the new hint types itself out and its note glows in its family colour
 function scentSigh() {
   for (const el of document.querySelectorAll('.g-drops svg.lost')) mist(el, 'rgba(150, 138, 126, .7)', { n: 5, rise: 46, size: 12, at: 0.2 });
-  const hint = gameEl.querySelector('.g-sc-hint.new span'); typeOut(hint, { ms: Math.min(1100, hint ? hint.textContent.length * 14 : 0), delay: 250 });
-  const chip = gameEl.querySelector('[data-sc-notes] .fresh'); if (chip) setTimeout(() => ring(chip, getComputedStyle(chip).getPropertyValue('--c') || '#888', { size: 70, ms: 1100 }), 350);
+  scentNewClue();
   cascade([...gameEl.querySelectorAll('[data-sc-tried] .badge')].slice(-1), { cls: 'mv-pop' });
   replay(gameEl.querySelector('.g-sc-field input'), 'flash');
   replay(gameEl.querySelector('[data-sc-say]'), 'mv-in');
+}
+// a new or sharper clue types itself out and its note glows in its family colour
+function scentNewClue() {
+  const hint = gameEl.querySelector('.g-sc-hint.new span'); typeOut(hint, { ms: Math.min(1100, hint ? hint.textContent.length * 14 : 0), delay: 250 });
+  const chip = gameEl.querySelector('[data-sc-notes] .fresh'); if (chip) setTimeout(() => ring(chip, getComputedStyle(chip).getPropertyValue('--c') || '#888', { size: 70, ms: 1100 }), 350);
 }
 function scentGiveUp() {
   if (S?.kind !== 'scent' || S.phase !== 'scent') return;
@@ -803,7 +830,7 @@ function scentChip(x) {
   if (S.found.has(x.id)) { const rr = rareOf(x.id); return `<span class="badge note tinted g-sc-n${S.fresh === x.id ? ' pop' : ''}" data-id="${x.id}" style="--c:${A.ingHex(ing)}" title="${rr.label}: in ${rr.pct}% of perfumes"><span class="dot" style="background:${A.ingHex(ing)}"></span>${A.esc(x.n)}<em class="g-chip-pts">${rr.pts}</em>${share}</span>`; }
   if (S.phase === 'done') return `<span class="badge note g-sc-n missed" data-id="${x.id}" title="Not found"><span class="dot" style="background:${A.ingHex(ing)}"></span>${A.esc(x.n)}${share}</span>`;
   const lv = S.level[x.id] || 0, col = lv ? famHex(ing.family) : '';
-  return `<span class="badge note g-sc-n hidden${lv ? ' hinted' : ''}${S.freshHint === x.id ? ' fresh' : ''}" data-id="${x.id}" ${lv ? `style="--c:${col}" title="Hinted: ${FAMILIES[ing.family].label.toLowerCase()}"` : 'title="Hidden note"'}>${lv ? `<span class="dot" style="background:${col}"></span>` : ''}<span class="mono">${lv >= 4 ? A.esc(pattern(x.n)) : '?'}</span></span>`;
+  return `<span class="badge note g-sc-n hidden${lv ? ' hinted' : ''}${S.target === x.id ? ' clued' : ''}${S.freshHint === x.id ? ' fresh' : ''}" data-id="${x.id}" ${lv ? `style="--c:${col}" title="${S.target === x.id ? 'The clued note' : 'Hinted'}: ${FAMILIES[ing.family].label.toLowerCase()}"` : 'title="Hidden note"'}>${lv ? `<span class="dot" style="background:${col}"></span>` : ''}<span class="mono">${lv >= 4 ? A.esc(pattern(x.n)) : '?'}</span></span>`;
 }
 function scentPyramid() {
   return ['top', 'heart', 'base'].map((t) => { const xs = S.notes.filter((x) => x.t === t); return xs.length ? `<div class="tier"><span class="k">${TIER_NAME[t]}</span><div class="notes">${xs.map(scentChip).join('')}</div></div>` : ''; }).join('');
@@ -812,10 +839,12 @@ const drop = (on, k, lost) => `<svg viewBox="0 0 24 24" class="${on ? 'on' : los
 const scentDrops = () => Array.from({ length: SCENT_LIVES }, (_, k) => drop(k < S.lives, k, S.justLost && k === S.lives)).join('');
 const HINT_IC = ['<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2"/>', '<path d="M12 21s6-5.4 6-10.3A6 6 0 0 0 6 10.7C6 15.6 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.2"/>', '<path d="M5 19c8 0 14-6 14-14-8 0-14 6-14 14zM5 19l7-7"/>', '<path d="M4 7h16M4 12h10M4 17h7"/>'];
 function scentHints() {
-  return S.hints.length ? S.hints.slice().reverse().map((h, k) => `<div class="g-sc-hint${k === 0 && S.phase === 'scent' ? ' new' : ''}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${HINT_IC[h.lv - 1]}</svg><span>${A.esc(h.text)}</span></div>`).join('')
-    : '<p class="g-note muted">Each wrong guess unlocks a hint about a note that is still hidden.</p>';
+  // while playing, clues about notes already found step aside
+  const hs = S.phase === 'scent' ? S.hints.filter((h) => !S.found.has(h.id)) : S.hints;
+  return hs.length ? hs.slice().reverse().map((h, k) => `<div class="g-sc-hint${h.spot ? ' clued' : ''}${k === 0 && S.phase === 'scent' && (S.newHint ?? true) ? ' new' : ''}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${HINT_IC[h.lv - 1]}</svg><span>${A.esc(h.text)}</span></div>`).join('')
+    : '<p class="g-note muted">One hidden note always has a clue. Find it and the clue moves to another note.</p>';
 }
-const hintCount = () => (S.hints.length ? `${S.hints.length} of ${SCENT_LIVES - 1}` : 'none yet');
+const hintCount = () => { const n = new Set(S.hints.filter((h) => S.phase !== 'scent' || !S.found.has(h.id)).map((h) => h.id)).size; return S.phase === 'scent' ? `${n} note${n === 1 ? '' : 's'} clued` : `${S.hints.length} in all`; };
 function scentHud() {
   const total = S.notes.filter((x) => x.id).length;
   hud.innerHTML = `<span class="g-hq"><b>${A.esc(S.f.name)}</b> · ${S.found.size} / ${total} notes</span><span class="g-drops" role="img" aria-label="${S.lives} chances left">${scentDrops()}</span>`;
@@ -1096,7 +1125,8 @@ export function openHelp() {
     <ol class="sheet-steps">
       <li><b>Type a note</b><span>Anything you think is in it: bergamot, rose, vanilla, oud… A right one lights up on the globe where it grows.</span></li>
       <li><b>Rarer notes score more</b><span>A classic like bergamot is worth ${RARE[0][2]}. A note few perfumes use is worth up to ${RARE[3][2]}.</span></li>
-      <li><b>Mind your drops</b><span>You have five <i class="sheet-drop">${drop}</i>. A wrong note costs one and unlocks a hint.</span></li>
+      <li><b>Mind your drops</b><span>You have five <i class="sheet-drop">${drop}</i>. A wrong note costs one and sharpens the clue.</span></li>
+      <li><b>Follow the clue</b><span>One hidden note always has a clue: its tier, family and the country it comes from. Find that note and a new clue appears for another one.</span></li>
       <li><b>Come back tomorrow</b><span>Everyone gets the same perfume. A new one arrives at midnight UTC.</span></li>
     </ol>
     <button class="btn primary sheet-go" data-sheet="play" autofocus>Play today’s scent</button>

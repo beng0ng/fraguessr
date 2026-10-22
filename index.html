@@ -1904,6 +1904,13 @@ details.lab-card[open]::details-content { height: auto; }
 .flyby[data-sky="night"] .fb-art.fb-3d, .flyby[data-sky="night"] .fb-art.fb-3d-head { filter: drop-shadow(0 0 9px rgba(200, 225, 255, .35)); }
 .flyby[data-sky="day"] .fb-art.fb-3d { filter: drop-shadow(0 8px 10px rgba(70, 55, 40, .22)); }
 .flyby.fb-gold .fb-art.fb-3d, .flyby.fb-gold .fb-art.fb-3d-head { filter: drop-shadow(0 0 12px rgba(255, 200, 80, .7)); }
+
+/* the clued note in the daily scent: its chip carries a soft ring, its clue card a tinted edge */
+.g-sc-n.hidden.clued { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c, var(--accent)) 30%, transparent); }
+.g-sc-n.hidden.clued:not(.fresh) { animation: scSpot 2.4s ease-in-out infinite; }
+@keyframes scSpot { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--c, var(--accent)) 14%, transparent); } }
+.g-sc-hint.clued { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+@media (prefers-reduced-motion: reduce) { .g-sc-n.hidden.clued { animation: none; } }
 </style>
 
 <div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="in-word">
