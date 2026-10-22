@@ -1823,6 +1823,87 @@ details.lab-card { interpolate-size: allow-keywords; }
 details.lab-card::details-content { height: 0; overflow: clip; transition: height .42s cubic-bezier(.3,.8,.2,1), content-visibility .42s allow-discrete; }
 details.lab-card[open]::details-content { height: auto; }
 @media (prefers-reduced-motion: reduce) { .tabs::before, .view, details.lab-card::details-content { transition: none; } }
+
+/* ── v51: the daily discovery set, a perfumer's coffret of sample vials ── */
+.g-ch-lid, .g-ch-in { transition: transform .5s cubic-bezier(.3,.8,.2,1), opacity .35s; transform-box: view-box; }
+.g-ch-lid { transform-origin: 5px 24px; }
+.lb-chest.ready .g-ch-in { opacity: 0; transform: translateY(6px); }
+.lb-chest.done .g-ch-lid, .chest-head .g-ch-lid { transform: translate(-2px, -6px) rotate(-17deg); }
+.chest-head .g-chest-ico.fresh .g-ch-lid { animation: cfLid 1s cubic-bezier(.3,.8,.2,1) .15s both; }
+.chest-head .g-chest-ico.fresh .g-ch-in { animation: cfRise .8s cubic-bezier(.2,.9,.2,1.15) .55s both; }
+.chest-head .g-chest-ico.fresh::after { content: ""; position: absolute; left: 20%; right: 20%; top: -10%; height: 70%; border-radius: 50%; background: radial-gradient(closest-side, color-mix(in srgb, #f6c9d8 70%, transparent), transparent); filter: blur(4px); animation: cfMist 1.8s ease-out .6s both; pointer-events: none; }
+@keyframes cfLid { from { transform: none; } 40% { transform: translate(0, -3px) rotate(4deg); } }
+@keyframes cfRise { from { opacity: 0; transform: translateY(10px); } }
+@keyframes cfMist { from { opacity: 0; transform: translateY(14px) scale(.6); } 35% { opacity: .9; } to { opacity: 0; transform: translateY(-16px) scale(1.4); } }
+.chest-kicker { display: block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); margin-bottom: 2px; }
+.chest-head h2 { font-family: var(--font-display); font-size: 26px; font-weight: 500; letter-spacing: -.01em; }
+/* a sample vial, filled as far as the fact is rare */
+.cf-vial { position: relative; flex: none; width: 8px; height: 15px; margin-right: 2px; border-radius: 2px 2px 3px 3px; border: 1px solid color-mix(in srgb, var(--r) 70%, var(--border)); background: linear-gradient(to top, var(--r) calc(var(--fill) * 100%), color-mix(in srgb, var(--r) 10%, transparent) 0); box-shadow: inset 1.5px 0 0 rgb(255 255 255 / .45); }
+.cf-vial::before { content: ""; position: absolute; left: 1px; right: 1px; top: -4px; height: 3px; border-radius: 1px; background: linear-gradient(135deg, #fff2c0, #c8902c); }
+.chest-chip { gap: 7px; padding-top: 7px; padding-bottom: 7px; }
+/* the week as seven vials on a rack: the ones behind filled, today's glowing */
+.lb-week { align-items: flex-end; gap: 4px; }
+.lb-week i { position: relative; width: 6px; height: 12px; border-radius: 1.5px 1.5px 2.5px 2.5px; background: color-mix(in srgb, var(--muted-foreground) 14%, transparent); box-shadow: inset 0 0 0 .8px color-mix(in srgb, var(--muted-foreground) 35%, transparent); }
+.lb-week i::before { content: ""; position: absolute; left: 1px; right: 1px; top: -3px; height: 2px; border-radius: 1px; background: color-mix(in srgb, #d4a24a 70%, var(--muted-foreground)); }
+.lb-week i.past { background: linear-gradient(to top, color-mix(in srgb, var(--r) 55%, #ff9a5a) 75%, transparent 0); box-shadow: inset 0 0 0 .8px color-mix(in srgb, #ff9a5a 60%, transparent); }
+.lb-week i.now { background: linear-gradient(to top, var(--r) 85%, transparent 0); box-shadow: inset 0 0 0 .8px var(--r), 0 0 8px var(--r); }
+.lb-week i:last-child { width: 8px; height: 15px; }
+.lb-week i:last-child:not(.now) { box-shadow: inset 0 0 0 1px var(--r); }
+.lb-streak svg { color: inherit; filter: drop-shadow(0 0 4px rgb(255 138 61 / .5)); }
+.loginbar { background: linear-gradient(90deg, color-mix(in srgb, #e8a33d 6%, var(--background)), var(--background) 40%, var(--background) 60%, color-mix(in srgb, var(--r) 7%, var(--background))); }
+.lb-chest { height: 32px; border-color: color-mix(in srgb, #c9a35a 45%, var(--border)); background: color-mix(in srgb, #c9a35a 8%, var(--card)); }
+.lb-chest .lb-ico { width: 26px; height: 26px; margin-top: -3px; }
+.lb-chest b { background: linear-gradient(135deg, #3a2032, #6a3d5c); box-shadow: 0 2px 10px -3px #6a3d5c; text-shadow: none; letter-spacing: .02em; }
+:root[data-theme="dark"] .lb-chest b { background: linear-gradient(135deg, #e3b14c, #c98a2a); color: #1d1208; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .lb-chest b { background: linear-gradient(135deg, #e3b14c, #c98a2a); color: #1d1208; } }
+.g-chest-week i { border-radius: 4px 4px 7px 7px; height: 22px; }
+@media (prefers-reduced-motion: reduce) { .chest-head .g-chest-ico.fresh .g-ch-lid, .chest-head .g-chest-ico.fresh .g-ch-in, .chest-head .g-chest-ico.fresh::after { animation: none; } }
+
+/* ── v51: more air. A wider side panel on big screens, generous gutters, calmer hairlines ── */
+@media (min-width: 1100px) { .main { grid-template-columns: minmax(0, 1fr) clamp(460px, 36vw, 580px); } }
+.panel-head { padding: 18px 24px 16px; gap: 14px; }
+.body { padding: 22px 24px 0; gap: 20px; }
+.game .body { gap: 18px; }
+.detail-top { padding: 12px 18px; }
+.hero { margin: 18px 24px 0; border-radius: 18px; border-color: color-mix(in srgb, var(--accent) 18%, var(--border)); }
+.section-h { margin-top: 10px; }
+.section-h > span:first-child { font-size: 23px; font-weight: 500; letter-spacing: -.005em; }
+.badges, .notes { gap: 8px; }
+.pyramid { gap: 14px; }
+.tier { grid-template-columns: 64px 1fr; gap: 12px; }
+.tier .k { padding-top: 6px; letter-spacing: .1em; }
+.facts, .callout { border-radius: 14px; }
+.facts div { padding: 13px 16px; }
+.callout { padding: 14px 16px; line-height: 1.5; }
+.panel .prose { line-height: 1.68; color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); }
+.g-sc-head .title { font-size: 40px; font-weight: 500; letter-spacing: -.01em; }
+.g-sc-about { margin: -2px 0 0; }
+.g-sc-hero { height: 270px; }
+.catbar { padding: 10px 20px; gap: 8px; }
+.list.ing .cat { padding: 18px 0 2px; }
+.list.ing .cat-h, .cat-h { padding: 0 24px; }
+.list.ing .rail { padding: 10px 24px 16px; scroll-padding: 0 24px; gap: 10px; }
+.list.ing .cat + .cat { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.list { padding: 8px 12px 28px; }
+.topbar { padding-block: 14px; }
+.loginbar { min-height: 40px; }
+@media (max-width: 860px) {
+  .panel-head { padding: 16px 18px 14px; }
+  .body { padding: 18px 18px 0; gap: 18px; }
+  .hero { margin: 14px 18px 0; border-radius: 16px; }
+  .list.ing .cat-h, .cat-h { padding: 0 18px; }
+  .list.ing .rail { padding: 10px 18px 14px; scroll-padding: 0 18px; }
+  .catbar { padding: 10px 16px; }
+  .g-sc-head .title { font-size: 34px; }
+}
+
+/* v51: the sky objects as 3D models (flyers3d.js) over their flat art */
+.fb-art .fb-gl { pointer-events: none; animation: wfade .45s ease both; }
+.fb-3d > svg { opacity: 0; transition: opacity .45s ease; }
+.fb-3d-head > svg circle { opacity: 0; transition: opacity .45s ease; }
+.flyby[data-sky="night"] .fb-art.fb-3d, .flyby[data-sky="night"] .fb-art.fb-3d-head { filter: drop-shadow(0 0 9px rgba(200, 225, 255, .35)); }
+.flyby[data-sky="day"] .fb-art.fb-3d { filter: drop-shadow(0 8px 10px rgba(70, 55, 40, .22)); }
+.flyby.fb-gold .fb-art.fb-3d, .flyby.fb-gold .fb-art.fb-3d-head { filter: drop-shadow(0 0 12px rgba(255, 200, 80, .7)); }
 </style>
 
 <div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="in-word">

@@ -34,7 +34,7 @@ const RANK = {
   hard: { col: '#b57bff', hit: 5, dodge: 1, label: 'Hard' },
   legendary: { col: '#ffc12e', hit: 2, dodge: 2, label: 'Legendary' },
 };
-const GROW = 1.15;
+const GROW = 1.45;
 export const FLYERS = Object.fromEntries([...NIGHT, ...DAY].map((x) => [x.id, { ...x, sky: NIGHT.includes(x) ? 'night' : 'day' }]));
 
 const KEY = 'noteguessr:sky';
@@ -110,6 +110,8 @@ export function createFlybys({ stage, isDark, reduce, allowed, onCatch }) {
     el.style.cssText = `width:${w}px;height:${h}px;--rk:${rk.col};--hit:${rk.hit}px;--hx:${hx * 100}%;--hy:${(f.hy ?? 0.5) * 100}%;--hs:${Math.round(Math.min(w, h) * 2)}px`;
     el.innerHTML = `<span class="fb-halo" aria-hidden="true"></span><span class="fb-art">${f.art}</span>`;
     layer.append(el);
+    // the flat art shows at once; a detailed 3D model of the same thing takes its place when it has loaded
+    import('./flyers3d.js').then((m) => { if (cur === me && !me.caught) me.gl = m.mountFlyer(el.querySelector('.fb-art'), f, { w, h, night: f.sky === 'night', reduce }); }).catch(() => {});
     // the first few times, a label says it can be caught; it rides along below without turning
     let tip = null;
     if (st.seen <= 3) { tip = document.createElement('span'); tip.className = 'fb-tip'; tip.innerHTML = `<i></i>Catch it`; tip.setAttribute('aria-hidden', 'true'); layer.append(tip); }
@@ -198,7 +200,7 @@ export function createFlybys({ stage, isDark, reduce, allowed, onCatch }) {
     if (cur !== me) return;
     cancelAnimationFrame(me.raf); clearTimeout(me.timer);
     me.tip?.remove(); cur = null; quietUntil = performance.now() + (caught ? 60000 : 30000);
-    if (caught || reduce) { me.el.classList.add('fb-gone'); setTimeout(() => me.el.remove(), 600); } else me.el.remove();
+    if (caught || reduce) { me.el.classList.add('fb-gone'); setTimeout(() => { me.gl?.stop(); me.el.remove(); }, 600); } else { me.gl?.stop(); me.el.remove(); }
   }
   // the daily game, a sheet or the opening page takes over: whatever is passing leaves at once
   function clear() { if (cur && !cur.caught) end(cur); }

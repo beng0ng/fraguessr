@@ -933,6 +933,7 @@ function scentRender() {
         <div class="g-sc-head"><h2 class="title">${A.esc(f.name)}</h2><div class="g-sc-meta">${A.esc(f.house)} · ${f.year} · ${A.esc(f.audience === 'Unisex' ? 'Unisex' : f.audience === 'Men' ? 'Masculine' : 'Feminine')}</div></div>
         <div class="badges"><span class="badge accent" style="text-transform:capitalize">${A.esc(prof.genre)}</span>${prof.fams.slice(0, 3).map(({ fm }) => `<span class="badge"><span class="dot" style="background:${famHex(fm)}"></span>${FAMILIES[fm].label}</span>`).join('')}</div>
         <div class="g-sc-prof" role="img" aria-label="Scent profile: ${prof.fams.map(({ fm, p }) => `${FAMILIES[fm].label} ${Math.round(p * 100)}%`).join(', ')}">${prof.fams.map(({ fm, p }) => `<i style="--c:${famHex(fm)};--p:${p}" title="${FAMILIES[fm].label} ${Math.round(p * 100)}%"></i>`).join('')}</div>
+        <p class="prose g-sc-about">${A.esc(prof.text)}</p>
         ${done ? `<div class="g-sc-end">
           <div class="g-sc-score"><div class="g-big mono"><b data-n>${got}</b><span>/${total}</span></div><div><h2 class="title">${verdict}</h2><p class="prose">${line}</p></div></div>
           <div class="g-meter"><i style="--p:${got / total}"></i></div>
@@ -959,7 +960,6 @@ function scentRender() {
         : `<div class="section-h"><span>Hints</span><span class="mono muted" data-sc-hcount>${hintCount()}</span></div>
           <div class="g-sc-hints" data-sc-hints>${scentHints()}</div>
           <div class="g-sc-tried notes" data-sc-tried>${scentTried()}</div>
-          <div class="section-h"><span>The scent</span></div><p class="prose">${A.esc(prof.text)}</p>
           <button class="btn ghost g-sc-quit" data-act="scent-giveup">Give up and reveal the notes</button>`}
       </div>
     </div>`;
@@ -1159,11 +1159,11 @@ const BY_RARITY = ['legendary', 'epic', 'rare', 'uncommon', 'common'];
 function chestSheet(api, got, L, fresh) {
   const list = got.slice().sort((a, b) => BY_RARITY.indexOf(a.r) - BY_RARITY.indexOf(b.r));
   const drops = got.reduce((n, x) => n + (x.drops || 0), 0), news = got.filter((x) => x.isNew).length;
-  const week = `<div class="g-chest-week" aria-label="Day ${L.rung + 1} of 7 on the chest ladder">${LADDER.map((x, k) => `<i class="${k < L.rung ? 'past' : k === L.rung ? 'now' : ''}" style="--r:${RARITY[x.best].col}" title="Day ${k + 1}: ${x.n} facts, ${rarer(x.best)}"><b>${k + 1}</b></i>`).join('')}</div>`;
-  openSheet(`<div class="chest-head"><span class="g-chest-ico big">${CHEST}</span><div><h2>Daily chest</h2><p class="sheet-lede">${L.n > 1 ? `Day ${L.n} of your login streak` : 'Day 1 of your login streak'}: ${got.length} facts${news === got.length ? '' : `, ${news} new`}, and ${drops} drops of essence for the lab.</p></div></div>
-    <div class="chest-row">${list.map((x, k) => `<button type="button" class="badge note chest-chip${k ? '' : ' on'}" data-chest="${k}" style="--r:${RARITY[x.r].col}"><span class="fc-pips">${'<i></i>'.repeat(RARITY[x.r].pips)}</span>${api.esc(api.ING[x.id].name)}${x.isNew ? '<em>New</em>' : ''}</button>`).join('')}</div>
+  const week = `<div class="g-chest-week" aria-label="Day ${L.rung + 1} of 7 of the week’s sets">${LADDER.map((x, k) => `<i class="${k < L.rung ? 'past' : k === L.rung ? 'now' : ''}" style="--r:${RARITY[x.best].col}" title="Day ${k + 1}: ${x.n} facts, ${rarer(x.best)}"><b>${k + 1}</b></i>`).join('')}</div>`;
+  openSheet(`<div class="chest-head"><span class="g-chest-ico big${fresh ? ' fresh' : ''}">${CHEST}</span><div><span class="chest-kicker mono">${L.n > 1 ? `Day ${L.n} of your streak` : 'Day 1 of your streak'}</span><h2>Today’s discovery set</h2><p class="sheet-lede">${got.length} sample vials, each holding a fact${news === got.length ? '' : ` (${news} new)`}, and ${drops} drops of essence for the lab.</p></div></div>
+    <div class="chest-row">${list.map((x, k) => `<button type="button" class="badge note chest-chip${k ? '' : ' on'}" data-chest="${k}" style="--r:${RARITY[x.r].col}"><span class="cf-vial" style="--fill:${RARITY[x.r].pips / 5}" title="${RARITY[x.r].label}"></span>${api.esc(api.ING[x.id].name)}${x.isNew ? '<em>New</em>' : ''}</button>`).join('')}</div>
     <div class="chest-slot"></div>
-    <div class="chest-next">${week}<span>Tomorrow: ${L.tomorrow.n} facts, ${rarer(L.tomorrow.best)}. Each day in a row makes the chest bigger, up to a legendary on day 7; miss a day and the streak starts over.</span></div>
+    <div class="chest-next">${week}<span>Tomorrow: ${L.tomorrow.n} facts, ${rarer(L.tomorrow.best)}. Each day in a row adds to the set, up to a legendary on day 7; miss a day and the streak starts over.</span></div>
     <button class="btn sheet-go" data-sheet="close">Done</button>`, 'chest-sheet');
   const slot = sheet.querySelector('.chest-slot');
   const show = (k) => { const x = list[k]; api.facts.mount(slot, x.id, x.r, { isNew: x.isNew }); sheet.querySelectorAll('.chest-chip').forEach((c, j) => { c.classList.toggle('on', j === k); c.setAttribute('aria-pressed', String(j === k)); }); };

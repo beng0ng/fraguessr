@@ -1743,18 +1743,19 @@ checkIn();
 // ── the login bar: the streak and today's chest along the top of the app (streak.js; the chest's sheet is in game.js) ──
 const loginBar = $('#loginbar');
 const chestApi = { facts: { chest: openChest, mount: mountFact }, ING, esc, saved: () => { dirty(); renderLoginBar(); } };
-const FLAME = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.5c.6 3.2 2.6 4.9 4.3 6.8A7.4 7.4 0 0 1 12 21.5a7.2 7.2 0 0 1-7-7.2c0-2.8 1.4-4.6 2.9-5.9.2 1.9.9 3.2 2.1 3.9C9.4 8.6 10.4 5.2 12 2.5z" fill="currentColor"/><path d="M12 13c1.7 1.5 2.8 2.7 2.8 4.4a2.8 2.8 0 0 1-5.6 0c0-1.5.9-2.8 2.8-4.4z" fill="#ffd66b"/></svg>';
+// the streak's mark: a drop of essence, glowing warmer as it grows
+const FLAME = '<svg viewBox="0 0 24 24" aria-hidden="true"><defs><linearGradient id="lb-drop" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffd27a"/><stop offset=".55" stop-color="#ff8a3d"/><stop offset="1" stop-color="#d8456a"/></linearGradient></defs><path d="M12 2.6c3.2 4.6 6.6 8.3 6.6 12.2A6.6 6.6 0 0 1 12 21.4a6.6 6.6 0 0 1-6.6-6.6C5.4 10.9 8.8 7.2 12 2.6z" fill="url(#lb-drop)"/><path d="M9.2 13.4c-.4 1.9.3 3.7 1.9 4.6" fill="none" stroke="#fff" stroke-opacity=".75" stroke-width="1.5" stroke-linecap="round"/></svg>';
 function renderLoginBar() {
   if (!loginBar) return;
   const L = loginState(), k = Math.max(1, L.n), next = L.opened ? L.tomorrow : L.chest, seen = !!localStorage.getItem(`noteguessr:chest:${L.today}`);
   const week = LADDER.map((x, i) => `<i class="${i < L.rung ? 'past' : i === L.rung ? 'now' : ''}" style="--r:${RARITY[x.best].col}"></i>`).join('');
   loginBar.style.setProperty('--r', RARITY[next.best].col);
-  loginBar.innerHTML = `<span class="lb-streak" title="Visit on consecutive days to grow the chest; miss a day and the streak starts over">${FLAME}<span>${k > 1 ? `<b>${k}</b>-day streak` : `Streak day <b>1</b>`}</span></span>`
-    + `<span class="lb-week" title="Day ${L.rung + 1} of 7: the chest grows each day, up to a legendary on day 7">${week}</span>`
+  loginBar.innerHTML = `<span class="lb-streak" title="Visit on consecutive days to grow your discovery set; miss a day and the streak starts over">${FLAME}<span>${k > 1 ? `<b>${k}</b>-day streak` : `Streak day <b>1</b>`}</span></span>`
+    + `<span class="lb-week" title="Day ${L.rung + 1} of 7: the set grows each day, up to a legendary on day 7">${week}</span>`
     + (L.opened
       // opened on another device: nothing to show here, so the pill is only a note
-      ? `<${seen ? 'button data-lb="see" title="See today’s chest"' : 'span'} class="lb-chest done"><span class="lb-ico">${CHEST}</span><span class="lb-t">Chest opened</span><span class="lb-s">Tomorrow: ${next.n} facts, ${rarer(next.best)}</span></${seen ? 'button' : 'span'}>`
-      : `<button class="lb-chest ready" data-lb="open"><span class="lb-ico">${CHEST}</span><span class="lb-t">Daily chest</span><span class="lb-s">${next.n} facts, ${rarer(next.best)}</span><b>Open</b></button>`);
+      ? `<${seen ? 'button data-lb="see" title="See today’s discovery set"' : 'span'} class="lb-chest done"><span class="lb-ico">${CHEST}</span><span class="lb-t">Set opened</span><span class="lb-s">Tomorrow: ${next.n} facts, ${rarer(next.best)}</span></${seen ? 'button' : 'span'}>`
+      : `<button class="lb-chest ready" data-lb="open"><span class="lb-ico">${CHEST}</span><span class="lb-t">Discovery set</span><span class="lb-s">${next.n} facts, ${rarer(next.best)}</span><b>Open</b></button>`);
   loginBar.hidden = false;
 }
 loginBar?.addEventListener('click', (e) => {
