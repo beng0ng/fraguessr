@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Page not found · Fraguessr</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<script>try { const t = localStorage.getItem('noteguessr:theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch {}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Manrope:wght@400;500;600&display=swap">
+<style>
+:root {
+  --background: #faf8f5; --foreground: #1f1a17; --card: #fffdfa; --muted: #f2eee8; --muted-foreground: #6c635b; --border: #e7e0d6; --accent: #a85d32; --accent-fg: #fff;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --background: #0f0d0c; --foreground: #f3eee7; --card: #151210; --muted: #1f1b18; --muted-foreground: #a69c92; --border: #2c2622; --accent: #e0a066; --accent-fg: #1a120b; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --background: #0f0d0c; --foreground: #f3eee7; --card: #151210; --muted: #1f1b18; --muted-foreground: #a69c92; --border: #2c2622; --accent: #e0a066; --accent-fg: #1a120b; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--foreground); font: 16px/1.65 var(--font-sans); -webkit-font-smoothing: antialiased; }
+main { width: min(680px, 100%); margin: 0 auto; padding: max(28px, env(safe-area-inset-top)) 20px 64px; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 40px; }
+.home { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; font: 500 24px var(--font-display); }
+.home svg { width: 28px; height: 28px; }
+.play { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: 12px; background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 15px; text-decoration: none; }
+.play svg { width: 14px; height: 14px; }
+h1 { margin: 0 0 8px; font: 500 clamp(40px, 7vw, 56px)/1.05 var(--font-display); letter-spacing: -0.01em; }
+.lede { margin: 0 0 36px; color: var(--muted-foreground); font-size: 18px; }
+h2 { margin: 40px 0 10px; font: 500 30px/1.15 var(--font-display); scroll-margin-top: 20px; }
+p, li { color: color-mix(in srgb, var(--foreground) 88%, var(--muted-foreground)); }
+ul, ol { padding-left: 22px; }
+li + li { margin-top: 6px; }
+a { color: var(--accent); text-underline-offset: 3px; }
+.card { margin-top: 14px; padding: 18px 20px; border-radius: 16px; background: var(--muted); }
+.card p { margin: 0; }
+.erase { margin-top: 14px; height: 40px; padding: 0 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); color: var(--foreground); font: 600 14px var(--font-sans); cursor: pointer; }
+.erase:hover { border-color: var(--muted-foreground); }
+.erase.armed { border-color: #c2412d; color: #c2412d; }
+.erase:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.small { font-size: 14px; color: var(--muted-foreground); }
+footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border); font-size: 14px; color: var(--muted-foreground); }
+main { min-height: 100vh; display: grid; place-content: center; text-align: center; } .play { margin-top: 8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>This bottle is empty</h1>
+  <p class="lede">There’s nothing at this address. Today’s perfume is waiting on the front page.</p>
+  <p><a class="play" href="/">Go to Fraguessr</a></p>
+</main>
+</body>
+</html>

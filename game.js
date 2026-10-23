@@ -167,7 +167,8 @@ ${Da}`}async function Ba(){const e=t,s=t.date;$.get("scent:sent")!==s&&await Ce.
       <li><b>Come back tomorrow</b><span>Everyone gets the same perfume. A new one arrives at midnight UTC.</span></li>
     </ol>
     <button class="btn primary sheet-go" data-sheet="play" autofocus>Play today’s scent</button>
-    <p class="sheet-foot muted">Between dailies, <button class="linkish" data-sheet="explore">explore the atlas</button> of ${W.length} ingredients and ${j.length} perfumes.</p>`,"help")}function Ua(){const e=$t(),s=Math.max(1,...e.dist.map(r=>r.n)),a=!!e.todays;wt(`<h2>Your stats</h2>
+    <p class="sheet-foot muted">Between dailies, <button class="linkish" data-sheet="explore">explore the atlas</button> of ${W.length} ingredients and ${j.length} perfumes.</p>
+    <p class="sheet-foot muted"><a href="about.html">About Fraguessr</a> · <a href="about.html#privacy">Privacy</a></p>`,"help")}function Ua(){const e=$t(),s=Math.max(1,...e.dist.map(r=>r.n)),a=!!e.todays;wt(`<h2>Your stats</h2>
     <div class="sheet-nums">${[[e.played,"Played"],[`${e.avg}%`,"Notes found"],[e.perfect,"Perfect"],[e.streak,"Streak"],[e.best,"Best streak"]].map(([r,i])=>`<div><b>${r}</b><span>${i}</span></div>`).join("")}</div>
     ${e.played?`<div class="sheet-score"><span>Best score <b class="mono">${e.bestScore.toLocaleString("en")}</b></span><span>Average <b class="mono">${e.avgScore.toLocaleString("en")}</b></span>${e.todays?`<span>Today <b class="mono">${e.todays.pts.toLocaleString("en")}</b></span>`:""}</div>`:""}
     <h3>Notes found per day</h3>
