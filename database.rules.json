@@ -44,6 +44,23 @@
           ".validate": false
         }
       }
+    },
+    "lobby": {
+      ".read": "auth != null",
+      "$key": {
+        ".write": "auth != null && $key.beginsWith(auth.uid + '_')",
+        ".validate": "newData.isString() && newData.val().length < 2000"
+      }
+    },
+    "rooms": {
+      "$room": {
+        ".read": "auth != null",
+        ".validate": "$room.matches(/^fg-[a-z0-9]{4}$/)",
+        "$key": {
+          ".write": "auth != null && $key.beginsWith(auth.uid + '_')",
+          ".validate": "newData.isString() && newData.val().length < 20000"
+        }
+      }
     }
   }
 }

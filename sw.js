@@ -1,6 +1,6 @@
-// Fraguessr's service worker (build 27af0c1a62). Stamped modules (?v=) never change, so they come from the device;
+// Fraguessr's service worker (build 7100345798). Stamped modules (?v=) never change, so they come from the device;
 // the page, the thumbnails and the fonts' stylesheet are refreshed from the network and kept for offline visits.
-const V = '27af0c1a62', ASSETS = 'fraguessr-assets', PAGES = 'fraguessr-pages', IMAGES = 'fraguessr-images';
+const V = '7100345798', ASSETS = 'fraguessr-assets', PAGES = 'fraguessr-pages', IMAGES = 'fraguessr-images';
 const KEEP = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/[^/]+@\d|fonts\.gstatic\.com\/)/;
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
