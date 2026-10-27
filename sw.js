@@ -1,7 +1,8 @@
-// Fraguessr's service worker (build 7100345798). Stamped modules (?v=) never change, so they come from the device;
+// Fraguessr's service worker (build b7b69379a7). Stamped modules (?v=) never change, so they come from the device;
 // the page, the thumbnails and the fonts' stylesheet are refreshed from the network and kept for offline visits.
-const V = '7100345798', ASSETS = 'fraguessr-assets', PAGES = 'fraguessr-pages', IMAGES = 'fraguessr-images';
-const KEEP = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/[^/]+@\d|fonts\.gstatic\.com\/)/;
+// Versioned libraries (the 3D and globe code, the fonts, Firebase's SDK) never change at their address, so they are kept too.
+const V = 'b7b69379a7', ASSETS = 'fraguessr-assets', PAGES = 'fraguessr-pages', IMAGES = 'fraguessr-images';
+const KEEP = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/[^/]+@\d|fonts\.gstatic\.com\/|www\.gstatic\.com\/firebasejs\/\d)/;
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
   const c = await caches.open(ASSETS);
