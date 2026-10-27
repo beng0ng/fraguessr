@@ -165,3 +165,14 @@ To switch accounts on (this also switches on the daily stats): in the Firebase c
 - Fact-card animations stop drawing while hidden (closed sheets, the detail page slid away, background tabs).
 - After a pinch zoom, lifting one finger no longer makes the globe jump.
 - A deploy while a tab is open: the previous version's files stay cached for one more round, and the page offers a Reload.
+
+## v65: fixes, memory and small screens
+
+- Escape in the middle of a practice game asks once before leaving (the rounds so far don't count); going back to the atlas no longer leaves an extra step in the history.
+- A link or address opened while the site is already open (an invite, `#play-daily`, a perfume) goes where it points, from whatever was open; Back and Forward move between those pages.
+- The 3D studio keeps a bounded set of label and texture pictures instead of one per perfume opened, stops its frame loop when the model is at rest or out of sight, and recovers when a phone takes the graphics chip back. A list picture that can't be drawn no longer stalls the queue of later ones.
+- The daily pictures of the 53 perfumes with glass stoppers were redrawn: the stopper was a white block, and is now see-through glass on both themes.
+- Reduced motion: an ingredient's vignette is drawn (it was blank), still fact cards follow the theme and a resize, and the 3D model doesn't spin in.
+- Short screens (landscape phones, 200% zoom): the fact cards of a perfume's journey scroll instead of being cut off, and sky quiz answers are brought into view while the clock runs.
+- Fact cards measure their glow once rather than every frame, common facts skip it, and hidden cards stop all their timers. The globe's grid lines and place names do less work per frame; tilting the night sky no longer shows an empty strip.
+- "Erase my progress" on the About page keeps the once-a-day marker (so a replay isn't counted twice) and signs a signed-in player out on that device.

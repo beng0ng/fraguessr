@@ -93,7 +93,14 @@ footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--border
 const btn = document.getElementById('erase'), out = document.getElementById('erased');
 btn.addEventListener('click', () => {
   if (!btn.classList.contains('armed')) { btn.classList.add('armed'); btn.textContent = 'Tap again to erase everything'; return; }
-  try { for (const k of Object.keys(localStorage)) if (/^(noteguessr|fraguessr):/.test(k)) localStorage.removeItem(k); out.textContent = ' Done. Your progress on this device has been erased.'; }
+  // the once-a-day "counted" marker stays, so replaying today doesn't count a player twice in the shared totals;
+  // a signed-in player is signed out here too, or their account would put everything straight back
+  try {
+    const signedIn = !!localStorage.getItem('fraguessr:who');
+    for (const k of Object.keys(localStorage)) if (/^(noteguessr|fraguessr):/.test(k) && k !== 'noteguessr:scent:sent') localStorage.removeItem(k);
+    if (signedIn) try { indexedDB.deleteDatabase('firebaseLocalStorageDb'); } catch {}
+    out.textContent = signedIn ? ' Done. Your progress on this device has been erased and you’re signed out here. Your account keeps its copy; delete the account from its menu to remove that too.' : ' Done. Your progress on this device has been erased.';
+  }
   catch { out.textContent = ' This browser blocked the change. Clear this site’s data in your browser settings instead.'; }
   btn.classList.remove('armed'); btn.textContent = 'Erase my progress';
 });
