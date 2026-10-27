@@ -142,3 +142,13 @@ To switch accounts on (this also switches on the daily stats): in the Firebase c
 - The clue sits in a card with the note's picture, blurred and grey at first and coming into focus at each step, plus letter tiles that fill in. The hidden chip in the pyramid shows the same letters.
 - "Sharpen the clue" spends a drop to move the clue one step without guessing (never the last drop). It shows as 💡 in the share grid.
 - Older hints stay listed, smaller, under the card.
+
+## v63: bug sweep
+
+- Account sync no longer lets a second device overwrite today's scent: when another device's further-along day arrives, the open game picks it up.
+- The collection's "Sign in" link loads Firebase first and opens the right sheet; if Firebase can't load, the link and button hide instead of leaving a dead form.
+- Signing in while in an online room removes the old guest entry before the switch, so no ghost player (or ghost host) is left behind.
+- Double-tapping Join, or leaving while joining, no longer leaves a half-joined room behind. A failed connection to rooms or Firebase is retried next time instead of being remembered until a reload.
+- The stats sheet's Share works from anywhere once today is played. Signing out no longer lets a player be counted twice in "Everyone today".
+- A miss only promises a sharper hint when there is one. The synced message names the Fraguessr account on the public site.
+- Google Fonts no longer block the first paint.
