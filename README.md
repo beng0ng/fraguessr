@@ -152,3 +152,16 @@ To switch accounts on (this also switches on the daily stats): in the Firebase c
 - The stats sheet's Share works from anywhere once today is played. Signing out no longer lets a player be counted twice in "Everyone today".
 - A miss only promises a sharper hint when there is one. The synced message names the Fraguessr account on the public site.
 - Google Fonts no longer block the first paint.
+
+## v64: access and robustness
+
+- The phone's Back button now steps back inside the app (a detail or a game back to the atlas) instead of leaving the site.
+- Keyboard: focus moves to the detail page's Back button and returns to the card it came from; practice and bonus pin rounds can be played with the arrow keys, Space (drop a pin) and Enter; search results are announced as a list to screen readers; Enter on the opening page's links follows them.
+- Tinted accents (each perfume's colour) are adjusted to keep 4.5:1 contrast with their text on both themes; the inactive Daily/Atlas tab is darker.
+- Searching during a game leaves the game cleanly; Escape in the search box only closes the search.
+- A saved light/dark choice applies before the first paint. The opening animation waits for the (now non-blocking) font stylesheet.
+- A failed load of the game or card code is retried on the next tap, with a note; site data blocked by the browser no longer stops the app from starting.
+- The login bar and discovery set catch up with a new day in a tab left open past midnight Pacific time.
+- Fact-card animations stop drawing while hidden (closed sheets, the detail page slid away, background tabs).
+- After a pinch zoom, lifting one finger no longer makes the globe jump.
+- A deploy while a tab is open: the previous version's files stay cached for one more round, and the page offers a Reload.

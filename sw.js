@@ -1,12 +1,16 @@
-// Fraguessr's service worker (build ee096f7fa4). Stamped modules (?v=) never change, so they come from the device;
+// Fraguessr's service worker (build db83f2dc61). Stamped modules (?v=) never change, so they come from the device;
 // the page, the thumbnails and the fonts' stylesheet are refreshed from the network and kept for offline visits.
 // Versioned libraries (the 3D and globe code, the fonts, Firebase's SDK) never change at their address, so they are kept too.
-const V = 'ee096f7fa4', ASSETS = 'fraguessr-assets', PAGES = 'fraguessr-pages', IMAGES = 'fraguessr-images';
+const V = 'db83f2dc61', ASSETS = 'fraguessr-assets', PAGES = 'fraguessr-pages', IMAGES = 'fraguessr-images', META = 'fraguessr-meta';
 const KEEP = /^https:\/\/(cdn\.jsdelivr\.net\/npm\/[^/]+@\d|fonts\.gstatic\.com\/|www\.gstatic\.com\/firebasejs\/\d)/;
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (e) => e.waitUntil((async () => {
+  // the previous build's files stay one more round, for a tab still open on it
+  const m = await caches.open(META), seen = (await (await m.match('versions'))?.json().catch(() => null)) || [];
+  const keep = [...seen.filter((x) => x !== V), V].slice(-2);
+  await m.put('versions', new Response(JSON.stringify(keep)));
   const c = await caches.open(ASSETS);
-  for (const r of await c.keys()) { const u = new URL(r.url); if (u.origin === location.origin && u.searchParams.has('v') && u.searchParams.get('v') !== V) await c.delete(r); }
+  for (const r of await c.keys()) { const u = new URL(r.url); if (u.origin === location.origin && u.searchParams.has('v') && !keep.includes(u.searchParams.get('v'))) await c.delete(r); }
   await self.clients.claim();
 })()));
 const put = (name, req, res) => { if (res && (res.ok || res.type === 'opaque')) { const copy = res.clone(); caches.open(name).then((c) => c.put(req, copy)); } return res; };
