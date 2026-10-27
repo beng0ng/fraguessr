@@ -61,6 +61,32 @@
           ".validate": "newData.isString() && newData.val().length < 20000"
         }
       }
+    },
+    "ladder": {
+      ".read": "auth != null",
+      ".indexOn": [
+        "r"
+      ],
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['r', 'nm', 'col', 'n', 'w', 't']) && newData.child('r').isNumber() && newData.child('r').val() >= 0 && newData.child('r').val() <= 4000 && newData.child('nm').isString() && newData.child('nm').val().length <= 18 && newData.child('col').isString() && newData.child('col').val().matches(/^#[0-9a-fA-F]{6}$/) && newData.child('n').isNumber() && newData.child('w').isNumber() && newData.child('w').val() <= newData.child('n').val() && newData.child('t').isNumber() && newData.child('t').val() <= now + 60000",
+        "$other": {
+          ".validate": "$other === 'r' || $other === 'nm' || $other === 'col' || $other === 'n' || $other === 'w' || $other === 't'"
+        }
+      }
+    },
+    "ghosts": {
+      ".read": "auth != null",
+      ".indexOn": [
+        "t"
+      ],
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['t', 'j']) && newData.child('t').isNumber() && newData.child('t').val() <= now + 60000 && newData.child('j').isString() && newData.child('j').val().length < 3000",
+        "$other": {
+          ".validate": "$other === 't' || $other === 'j'"
+        }
+      }
     }
   }
 }
