@@ -217,3 +217,13 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - Houses games warm up. Rounds one and two come from big houses, with six or more perfumes in the atlas, such as Dior, Chanel, Tom Ford, Byredo or Gucci. Round three needs four, round four needs two, and round five can be any house.
 - Up to three other perfumes from the house show free under each question, with their years.
 - The paid hints now build toward the answer: the region, then the country, then the city's name with every third letter of each word showing (P _ _ i _, N _ _  Y _ _ k).
+
+## v70: the nose level and perfume backdrops
+
+- Everything a player does now adds up to one level, shown as a gold ring in the bar under the header with a title from a perfumer's career, from "Curious nose" to "Le Nez".
+- XP is worked out from the save itself (`progress.js`): daily scents (60 each, 10 a note named, 80 for every note), bonus rounds, notes found, facts by rarity (8 common to 120 legendary), goals, the best login streak, ranked matches, wins and tiers, perfumes blended and sky challenges. Nothing played before v70 is lost, and the level follows a synced account.
+- Daily scents and bonus rounds are banked as running totals in the stats, so the level never drops when an account's 45-day window of old days moves on.
+- Each level takes 70 XP more than the one before (100 for level 2). A gain floats off the ring; a new level brings a card with the backdrop it unlocked.
+- Tapping the ring opens the progress sheet: the level, the backdrops and where the XP came from. Tapping a backdrop shows it behind the globe straight away, even a locked one, and an unlocked one can be kept.
+- Twelve backdrops unlock between levels 2 and 40, each a scene after a famous perfume: Capri (Light Blue), Gilded Deco (No. 5), Moonlit Garden (Shalimar), Night Blossom (Lost Cherry), Campfire Dunes (Santal 33), Deep Blue (Acqua di Giò), Neon Noir (Black Opium), Mineral Earth (Terre d'Hermès), Electric Twilight (Sauvage), Star Candy (Angel), Liquid Gold (J'adore) and Crystal Light (Baccarat Rouge 540).
+- Backdrops are painted on a canvas (`backdrops.js`, loaded only when one is used), each in a day and a night version that follows the theme. Their layers slide at different speeds as the globe turns, and their light, water, smoke and stars move. With reduced motion they hold still.
