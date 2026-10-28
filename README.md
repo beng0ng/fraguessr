@@ -197,7 +197,7 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - `CITIES` in `game.js` names about 80 perfume cities; each house's pin in `HOUSES` takes the nearest one, which gives the answer its city and country.
 - One city per game. Cities are picked by the square root of how many perfumes they hold, so Paris, New York, Milan and London turn up often without crowding out Muscat, Tokyo or Curitiba.
 - Houses whose name carries their city (Jo Malone London, Kilian Paris, Acqua di Parma, and others) are left out, since the name would give the answer away.
-- The three hints are other perfumes from the same house, the region, and the country with the city's first letter and length.
+- The hints are the region, then the country, then the city's name with every third letter of each word showing. Other perfumes from the house show free under the question. (Changed in v69.)
 - The reveal shows the house, its city, how many of its perfumes are in the atlas, and a description of the perfume.
 - Houses is in the ranked pool with Notes and Perfumes, and in the room and same-device mode pickers.
 - A round's answer carries its own colour (the perfume's), and `ingHex` uses it when it is set.
@@ -211,3 +211,9 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - The brand now leads back to the daily scent.
 - The daily end screen offers "Try ranked" last, after the atlas, the collection and practice games.
 - Ranked play itself (the ladder, rewards, ghosts and house noses) is unchanged.
+
+## v69: a fairer Houses mode
+
+- Houses games warm up. Rounds one and two come from big houses, with six or more perfumes in the atlas, such as Dior, Chanel, Tom Ford, Byredo or Gucci. Round three needs four, round four needs two, and round five can be any house.
+- Up to three other perfumes from the house show free under each question, with their years.
+- The paid hints now build toward the answer: the region, then the country, then the city's name with every third letter of each word showing (P _ _ i _, N _ _  Y _ _ k).
