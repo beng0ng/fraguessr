@@ -202,3 +202,12 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - Houses is in the ranked pool with Notes and Perfumes, and in the room and same-device mode pickers.
 - A round's answer carries its own colour (the perfume's), and `ingHex` uses it when it is set.
 - Denmark, Iceland, the UAE, Kuwait and Singapore were added to the region table for the region hint.
+
+## v68: the daily scent is the front again; ranked is in beta
+
+- A first visit and the bare site open on today's scent again. The opening page's big card is the daily perfume, as in v65.
+- The opening page has smaller links to the atlas, ranked (marked Beta) and play with friends.
+- The tabs read Daily, Atlas, Ranked. Ranked sits at the end with a Beta mark, which hides below 900px wide to save room. The ranked page's title also carries the mark.
+- The brand now leads back to the daily scent.
+- The daily end screen offers "Try ranked" last, after the atlas, the collection and practice games.
+- Ranked play itself (the ladder, rewards, ghosts and house noses) is unchanged.
