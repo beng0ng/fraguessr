@@ -227,3 +227,10 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - Tapping the ring opens the progress sheet: the level, the backdrops and where the XP came from. Tapping a backdrop shows it behind the globe straight away, even a locked one, and an unlocked one can be kept.
 - Twelve backdrops unlock between levels 2 and 40, each a scene after a famous perfume: Capri (Light Blue), Gilded Deco (No. 5), Moonlit Garden (Shalimar), Night Blossom (Lost Cherry), Campfire Dunes (Santal 33), Deep Blue (Acqua di Giò), Neon Noir (Black Opium), Mineral Earth (Terre d'Hermès), Electric Twilight (Sauvage), Star Candy (Angel), Liquid Gold (J'adore) and Crystal Light (Baccarat Rouge 540).
 - Backdrops are painted on a canvas (`backdrops.js`, loaded only when one is used), each in a day and a night version that follows the theme. Their layers slide at different speeds as the globe turns, and their light, water, smoke and stars move. With reduced motion they hold still.
+
+## v71: every screen size
+
+- Phones held sideways, and other short, wide windows (up to 540px tall), keep the globe and the panel side by side instead of stacking them. The header, the bar under it and the pictures in the panel get lower, the region buttons over the globe are hidden, and in the daily scent the guess box is on screen without scrolling.
+- The opening page scrolls on a short screen instead of cutting off its top and its play button. Held sideways it drops the bottle mark and puts the play button beside today's perfume.
+- Below 360px wide, the bar under the header leaves out the week of days so the discovery set's Open button fits.
+- Checked at 320, 360, 390 and 430 wide phones, phones held sideways (568 to 932 wide), tablets (600 to 1024 wide, both ways round) and desktops up to 1920 wide: nothing spills past the right edge.
