@@ -234,3 +234,11 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - The opening page scrolls on a short screen instead of cutting off its top and its play button. Held sideways it drops the bottle mark and puts the play button beside today's perfume.
 - Below 360px wide, the bar under the header leaves out the week of days so the discovery set's Open button fits.
 - Checked at 320, 360, 390 and 430 wide phones, phones held sideways (568 to 932 wide), tablets (600 to 1024 wide, both ways round) and desktops up to 1920 wide: nothing spills past the right edge.
+
+## v72: polish
+
+- On touch screens the small chips, filters, toggles, colour swatches and the level ring have a finger-sized tap area (about 40px) without looking any different.
+- The Beta marks are brighter in dark mode, so they read clearly against the dark header.
+- The "Lock in guess" button no longer jolts sideways as it pops in.
+- The site's main heading stays in the page on phones under 400px wide (hidden from view, still read by screen readers).
+- Checked every screen in light and dark at phone, tablet and desktop sizes, the in-game screens (guesses, clues, the end card, bonus round, chest, practice rounds, collection), accessibility rules and tap target sizes.
