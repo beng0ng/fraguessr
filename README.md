@@ -252,3 +252,15 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - Ranked's numbers sit in one strip divided by rules instead of five grey tiles.
 - Small labels are in sentence case ("Daily bonus", "Next milestone", "Your sillage") instead of spaced capitals.
 - The practice games' header no longer has note tags drifting across the title.
+
+## v74: clues that describe the note
+
+- The daily scent's clue now describes the hidden note instead of spelling it out. Each of its five steps adds something new:
+  1. its family and how it smells ("Lemony, peppery and cool, like smoke curling through a stone church during mass"),
+  2. where it grows, as the globe turns to show you,
+  3. where you may have met it outside perfume ("One of the three gifts the Magi brought...") and which part of the plant it is,
+  4. a line from its story in the atlas, and its first letter,
+  5. another line from its story, with about half its letters showing.
+- Letters only appear in the last two steps, and never more than about half of them (before, step five showed all but one letter). The picture still comes into focus step by step, and earlier clues stay listed under the newest one.
+- The smell and "where you may have met it" lines are new for all 354 notes (`clues.js`). They never use the note's name, its other names or its country, and the story lines black out the note's other names too (olibanum for frankincense).
+- How to play describes the new clue steps.
