@@ -242,3 +242,13 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - The "Lock in guess" button no longer jolts sideways as it pops in.
 - The site's main heading stays in the page on phones under 400px wide (hidden from view, still read by screen readers).
 - Checked every screen in light and dark at phone, tablet and desktop sizes, the in-game screens (guesses, clues, the end card, bonus round, chest, practice rounds, collection), accessibility rules and tap target sizes.
+
+## v73: a calmer, more natural look
+
+- Every control (tabs, filters, toggles, the header links) now uses the same clean sans as the rest of the text. The serif stays for the names of perfumes and notes. The carved Roman-capital face is gone, which is one less web font to load.
+- Nothing shimmers, pings or floats while the page sits still: the sweeping shine on the start buttons, the pulsing "live" dots, the discovery set's glow and nudge, the floating bottles and the specks rising on the opening page are gone. Movement now only comes from something happening.
+- Cards have one plain border and a soft neutral shadow instead of tinted borders and coloured glows (the opening card, the daily scent card, ranked's sillage card and the selected mode).
+- The day's result is one card with sections divided by thin rules, instead of boxes inside a box.
+- Ranked's numbers sit in one strip divided by rules instead of five grey tiles.
+- Small labels are in sentence case ("Daily bonus", "Next milestone", "Your sillage") instead of spaced capitals.
+- The practice games' header no longer has note tags drifting across the title.
