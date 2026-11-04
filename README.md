@@ -1,6 +1,6 @@
 # Fraguessr
 
-Interactive cobe globe of where 354 perfume ingredients from 116 countries come from, linked to 602 fragrances from 198 houses around the world.
+Interactive cobe globe of where 354 perfume ingredients from 116 countries come from, linked to 933 fragrances from 235 houses around the world.
 
 The page opens on a chooser whose main door is **Ranked** (duels against other players on the Sillage ladder, see v66), with **Daily scent** (today's famous fragrance, name its notes), the atlas and friends beside it. The Ranked / Daily / Atlas tabs in the top bar switch between them at any time, and the logo leads to ranked play. Deep links (`#i-…`, `#f-…`, `#play`, `#play-ranked`) skip the chooser.
 
@@ -264,3 +264,19 @@ Ranked duels are now the front of the site: the opening page's big door, the fir
 - Letters only appear in the last two steps, and never more than about half of them (before, step five showed all but one letter). The picture still comes into focus step by step, and earlier clues stay listed under the newest one.
 - The smell and "where you may have met it" lines are new for all 354 notes (`clues.js`). They never use the note's name, its other names or its country, and the story lines black out the note's other names too (olibanum for frankincense).
 - How to play describes the new clue steps.
+
+## v75: 331 more perfumes, and Explore up front
+
+- The atlas grows from 602 to 933 perfumes and from 198 to 235 houses. The additions were researched in four groups and checked against Fragrantica, Basenotes, Parfumo, Olfastory and the houses' own pages:
+  - designer releases since 1990 (Allure Homme, Poison Girl, L'Instant de Guerlain, Acqua di Giò Profondo, Luna Rossa, The Only One, Dahlia Noir, 212, Escape, Polo Sport, La Panthère, Antidote and more),
+  - niche and luxury houses (Serge Lutens, Byredo, Parfums de Marly, Maison Margiela Replica, Le Labo, Kilian, Amouage, Penhaligon's, Memo, Frédéric Malle, Louis Vuitton, Diptyque and others),
+  - classics from before 1990 (Fougère Royale, Tabac Blond, Narcisse Noir, Nahéma, Cristalle, Bandit, Chypre, Vent Vert, Ma Griffe, Cinnabar, Aramis, Quorum, 4711 and more),
+  - popular and global scents (Lattafa, Armaf, Afnan, Al Haramain and Rasasi, celebrity lines such as Ariana Grande, Rihanna and CR7, and viral picks from Kayali, Sol de Janeiro and Phlur).
+- Every new perfume links at least five of its notes to ingredients on the globe. 19 note spellings used by the new pyramids were added to `ALIASES` (wild rose, star jasmine, red cedar, hibiscus seed for ambrette and others). 37 houses were added to `HOUSES`.
+- 38 of the best known additions joined the practice games (`SCENT_MORE`). The daily rotation is unchanged.
+- Bottle thumbnails and detail stills for the new perfumes are pre-rendered in light and dark (`ONLY=<ids> node prerender.cjs f light|dark` now limits a run to those ids).
+- Explore is easier to find:
+  - The front page has a large Explore card (three bottles from the atlas, and the count of notes and perfumes) above the other ways to play.
+  - The atlas tab is called Explore.
+  - The atlas list has a Surprise me button that opens a random note or perfume.
+  - When the daily scent ends, a card opens today's perfume in the atlas, with how many perfumes share three or more of its notes.
